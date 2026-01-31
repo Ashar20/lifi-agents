@@ -261,22 +261,70 @@ Focus: Maintain target allocations. Only act if drift > 5%.`;
   }
 
   private async monitorYields(): Promise<any> {
-    // In production: Fetch real yield data
-    return {
-      opportunities: [
-        { chainId: 42161, protocol: 'Aave', token: 'USDC', apy: 12 },
-        { chainId: 1, protocol: 'Compound', token: 'USDC', apy: 8 },
-      ],
-    };
+    try {
+      const { getBestYieldOpportunities, getYieldComparison } = await import('./yieldFetcher');
+      const opportunities = await getBestYieldOpportunities('USDC', undefined, 500000);
+      const comparison = await getYieldComparison('USDC');
+      
+      return {
+        opportunities: opportunities.slice(0, 10).map(opp => ({
+          chainId: opp.chainId,
+          chainName: opp.chainName,
+          protocol: opp.protocol,
+          token: opp.tokenSymbol,
+          apy: opp.apy,
+          tvl: opp.tvl,
+          risk: opp.risk,
+        })),
+        bestOpportunity: comparison.bestOpportunity,
+        averageApy: comparison.averageApy,
+        timestamp: Date.now(),
+        source: 'DeFiLlama real yield data',
+      };
+    } catch (error) {
+      console.error('Yield monitoring error:', error);
+      return {
+        opportunities: [],
+        error: 'Yield fetch failed',
+      };
+    }
   }
 
   private async monitorAllocations(): Promise<any> {
-    // In production: Calculate real allocations
-    return {
-      current: { ETH: 60, USDC: 40 },
-      target: { ETH: 50, USDC: 50 },
-      drift: 10,
-    };
+    try {
+      const walletAddress = localStorage.getItem('trackedWalletAddress') || 
+        '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
+      
+      const { analyzePortfolioDrift } = await import('./rebalancer');
+      const analysis = await analyzePortfolioDrift(walletAddress);
+      
+      const current: Record<string, number> = {};
+      const target: Record<string, number> = {};
+      
+      analysis.allocations.forEach(a => {
+        current[a.tokenSymbol] = Math.round(a.currentPercent);
+        target[a.tokenSymbol] = a.targetPercent;
+      });
+      
+      return {
+        current,
+        target,
+        drift: analysis.totalDrift,
+        needsRebalancing: analysis.needsRebalancing,
+        actions: analysis.actions,
+        totalValue: analysis.totalValueUSD,
+        timestamp: analysis.timestamp,
+        source: 'Real portfolio allocation data',
+      };
+    } catch (error) {
+      console.error('Allocation monitoring error:', error);
+      return {
+        current: {},
+        target: {},
+        drift: 0,
+        error: 'Allocation fetch failed',
+      };
+    }
   }
 }
 

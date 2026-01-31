@@ -432,57 +432,218 @@ const App: React.FC = () => {
           summary = `Portfolio tracking failed: ${error.message}`;
         }
       } else if (agent.role === 'Oracle') {
-        // Rebalancer - Allocation management
-        const analysis = await geminiService.chat({
-          prompt: `As Rebalancer, analyze portfolio allocation drift: ${taskDescription || 'current allocation vs target allocation'}`
-        });
-        result = { 
-          type: 'rebalancing', 
-          drift: '10%',
-          current: { ETH: 60, USDC: 40 },
-          target: { ETH: 50, USDC: 50 },
-          recommendation: 'Rebalance needed',
-          analysis: analysis.text 
-        };
-        taskType = 'rebalancing';
-        summary = `Rebalancing needed: ${taskDescription || 'Portfolio drift detected - 10% deviation from target'}`;
+        // Rebalancer - Real allocation management
+        addLog(agent.name, '⚖️ Analyzing portfolio allocations across chains...');
+        
+        const walletAddress = localStorage.getItem('trackedWalletAddress') || 
+          '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
+        
+        try {
+          const { analyzePortfolioDrift } = await import('./services/rebalancer');
+          const driftAnalysis = await analyzePortfolioDrift(walletAddress);
+          
+          const currentAlloc: Record<string, number> = {};
+          const targetAlloc: Record<string, number> = {};
+          driftAnalysis.allocations.forEach(a => {
+            currentAlloc[a.tokenSymbol] = Math.round(a.currentPercent);
+            targetAlloc[a.tokenSymbol] = a.targetPercent;
+          });
+          
+          const analysis = await geminiService.chat({
+            prompt: `As Rebalancer, analyze this real portfolio drift: Total value: $${driftAnalysis.totalValueUSD.toFixed(2)}, Average drift: ${driftAnalysis.totalDrift.toFixed(1)}%. ${driftAnalysis.recommendations.join('. ')}. Needs rebalancing: ${driftAnalysis.needsRebalancing}. Provide a brief rebalancing recommendation.`
+          });
+          
+          result = { 
+            type: 'rebalancing', 
+            drift: `${driftAnalysis.totalDrift.toFixed(1)}%`,
+            current: currentAlloc,
+            target: targetAlloc,
+            needsRebalancing: driftAnalysis.needsRebalancing,
+            actions: driftAnalysis.actions,
+            recommendations: driftAnalysis.recommendations,
+            analysis: analysis.text 
+          };
+          taskType = 'rebalancing';
+          summary = driftAnalysis.needsRebalancing 
+            ? `Rebalancing needed: ${driftAnalysis.totalDrift.toFixed(1)}% drift detected. ${driftAnalysis.actions.length} actions recommended.`
+            : `Portfolio balanced: Only ${driftAnalysis.totalDrift.toFixed(1)}% drift. No rebalancing needed.`;
+        } catch (error: any) {
+          console.error('Rebalancing analysis error:', error);
+          const analysis = await geminiService.chat({
+            prompt: `As Rebalancer, report that allocation analysis encountered an error: ${error.message}`
+          });
+          result = { 
+            type: 'rebalancing', 
+            drift: 'N/A',
+            current: {},
+            target: {},
+            error: error.message,
+            analysis: analysis.text 
+          };
+          taskType = 'rebalancing';
+          summary = `Rebalancing analysis failed: ${error.message}`;
+        }
       } else if (agent.role === 'Merchant') {
-        // Yield Seeker - Yield optimization
-        const analysis = await geminiService.chat({
-          prompt: `As Yield Seeker, find best yield opportunities: ${taskDescription || 'scan for highest APY across all chains'}`
-        });
-        result = { 
-          type: 'yield_optimization',
-          opportunities: ['Aave on Arbitrum: 12% APY', 'Compound on Polygon: 15% APY'],
-          bestYield: '15%',
-          analysis: analysis.text 
-        };
-        taskType = 'yield_optimization';
-        summary = `Found yield opportunities: ${taskDescription || 'Best yield: 15% APY on Polygon Compound'}`;
+        // Yield Seeker - Real yield optimization
+        addLog(agent.name, '📈 Scanning DeFi protocols for yield opportunities...');
+        
+        try {
+          const { getYieldComparison, getBestYieldOpportunities } = await import('./services/yieldFetcher');
+          const yieldData = await getYieldComparison('USDC');
+          const topOpportunities = await getBestYieldOpportunities('USDC', undefined, 500000);
+          
+          if (topOpportunities.length > 0) {
+            const best = yieldData.bestOpportunity;
+            const analysis = await geminiService.chat({
+              prompt: `As Yield Seeker, analyze these real yield opportunities: Found ${topOpportunities.length} opportunities. Best: ${best?.protocol} on ${best?.chainName} with ${best?.apy.toFixed(2)}% APY, TVL: $${(best?.tvl || 0).toLocaleString()}, Risk: ${best?.risk}. Average APY across all opportunities: ${yieldData.averageApy.toFixed(2)}%. Provide a brief yield optimization recommendation.`
+            });
+            
+            result = { 
+              type: 'yield_optimization',
+              opportunities: topOpportunities.slice(0, 10).map(opp => 
+                `${opp.protocol} on ${opp.chainName}: ${opp.apy.toFixed(2)}% APY (${opp.risk} risk)`
+              ),
+              bestYield: `${best?.apy.toFixed(2)}%`,
+              bestProtocol: best?.protocol,
+              bestChain: best?.chainName,
+              averageApy: `${yieldData.averageApy.toFixed(2)}%`,
+              totalOpportunities: topOpportunities.length,
+              analysis: analysis.text 
+            };
+            taskType = 'yield_optimization';
+            summary = `Found ${topOpportunities.length} real yield opportunities. Best: ${best?.apy.toFixed(2)}% APY on ${best?.protocol} (${best?.chainName})`;
+          } else {
+            const analysis = await geminiService.chat({
+              prompt: `As Yield Seeker, report that no significant yield opportunities were found for USDC across supported chains.`
+            });
+            result = { 
+              type: 'yield_optimization',
+              opportunities: [],
+              bestYield: 'N/A',
+              message: 'No yield opportunities found',
+              analysis: analysis.text 
+            };
+            taskType = 'yield_optimization';
+            summary = `Scanned DeFi protocols. No significant yield opportunities found.`;
+          }
+        } catch (error: any) {
+          console.error('Yield fetching error:', error);
+          const analysis = await geminiService.chat({
+            prompt: `As Yield Seeker, report that yield scanning encountered an error: ${error.message}`
+          });
+          result = { 
+            type: 'yield_optimization',
+            opportunities: [],
+            bestYield: 'N/A',
+            error: error.message,
+            analysis: analysis.text 
+          };
+          taskType = 'yield_optimization';
+          summary = `Yield scanning failed: ${error.message}`;
+        }
       } else if (agent.role === 'Sentinel') {
-        // Risk Sentinel - Route validation
-        const analysis = await geminiService.chat({
-          prompt: `As Risk Sentinel, analyze LI.FI route safety: ${taskDescription || 'validate cross-chain route for slippage and bridge security'}`
-        });
-        result = { 
-          type: 'risk_analysis',
-          riskScore: 25,
-          status: 'SAFE',
-          slippage: '0.5%',
-          analysis: analysis.text 
-        };
-        taskType = 'risk_analysis';
-        summary = `Route validated: ${taskDescription || 'Risk score: 25/100 - Route safe for execution'}`;
+        // Risk Sentinel - Real route validation
+        addLog(agent.name, '🛡️ Analyzing route safety via LI.FI...');
+        
+        try {
+          const { analyzeRouteRisk } = await import('./services/riskAnalyzer');
+          
+          // Default route: USDC Ethereum -> Arbitrum for analysis
+          const riskAnalysis = await analyzeRouteRisk({
+            fromChain: 1, // Ethereum
+            toChain: 42161, // Arbitrum
+            fromToken: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC on Ethereum
+            toToken: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8', // USDC on Arbitrum
+            fromAmount: '1000000000', // 1000 USDC
+          });
+          
+          const analysis = await geminiService.chat({
+            prompt: `As Risk Sentinel, analyze this real route risk assessment: Risk Score: ${riskAnalysis.riskScore}/100, Status: ${riskAnalysis.status}, Slippage: ${riskAnalysis.slippage.toFixed(2)}%, Gas: $${riskAnalysis.gasCostUSD.toFixed(2)}, Steps: ${riskAnalysis.stepsCount}, Bridges: ${riskAnalysis.bridgesUsed.join(', ') || 'None'}. Issues: ${riskAnalysis.issues.join(', ') || 'None'}. Provide a safety recommendation.`
+          });
+          
+          result = { 
+            type: 'risk_analysis',
+            riskScore: riskAnalysis.riskScore,
+            status: riskAnalysis.status,
+            slippage: `${riskAnalysis.slippage.toFixed(2)}%`,
+            gasCostUSD: `$${riskAnalysis.gasCostUSD.toFixed(2)}`,
+            estimatedTime: `${Math.round(riskAnalysis.estimatedTime / 60)} min`,
+            bridgesUsed: riskAnalysis.bridgesUsed,
+            stepsCount: riskAnalysis.stepsCount,
+            issues: riskAnalysis.issues,
+            recommendations: riskAnalysis.recommendations,
+            isValid: riskAnalysis.isValid,
+            confidence: riskAnalysis.confidence,
+            analysis: analysis.text 
+          };
+          taskType = 'risk_analysis';
+          summary = `Route validated: Risk score ${riskAnalysis.riskScore}/100 - ${riskAnalysis.status}. ${riskAnalysis.issues.length > 0 ? `Issues: ${riskAnalysis.issues[0]}` : 'No issues detected.'}`;
+        } catch (error: any) {
+          console.error('Risk analysis error:', error);
+          const analysis = await geminiService.chat({
+            prompt: `As Risk Sentinel, report that route validation encountered an error: ${error.message}`
+          });
+          result = { 
+            type: 'risk_analysis',
+            riskScore: 100,
+            status: 'UNKNOWN',
+            slippage: 'N/A',
+            error: error.message,
+            analysis: analysis.text 
+          };
+          taskType = 'risk_analysis';
+          summary = `Route validation failed: ${error.message}`;
+        }
       } else if (agent.role === 'Glitch') {
-        // Route Executor - Execution
-        result = { 
-          type: 'cross_chain_swap',
-          route: 'ETH→ARB via LI.FI',
-          status: 'EXECUTING',
-          estimatedTime: '2 minutes'
-        };
-        taskType = 'cross_chain_swap';
-        summary = `⚡ Executing route: ${taskDescription || 'ETH→ARB via LI.FI - Estimated time: 2 minutes'}`;
+        // Route Executor - Real execution preparation
+        addLog(agent.name, '⚡ Preparing cross-chain route via LI.FI...');
+        
+        try {
+          const { prepareExecution, getExecutionSummary } = await import('./services/routeExecutor');
+          
+          // Prepare execution for USDC Ethereum -> Arbitrum
+          const walletAddress = localStorage.getItem('trackedWalletAddress') || 
+            '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
+          
+          const executionPlan = await prepareExecution({
+            fromChain: 1, // Ethereum
+            toChain: 42161, // Arbitrum
+            fromToken: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC on Ethereum
+            toToken: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8', // USDC on Arbitrum
+            fromAmount: '1000000000', // 1000 USDC
+            fromAddress: walletAddress,
+          });
+          
+          const summary_exec = getExecutionSummary(executionPlan);
+          
+          result = { 
+            type: 'cross_chain_swap',
+            route: summary_exec.route,
+            status: executionPlan.readyToExecute ? 'READY' : 'NOT_READY',
+            estimatedTime: summary_exec.estimatedTime,
+            gasCost: summary_exec.gasCost,
+            netValue: summary_exec.netValue,
+            estimatedOutput: `$${executionPlan.estimatedOutputUSD.toFixed(2)}`,
+            steps: executionPlan.steps.map(s => `${s.stepNumber}. ${s.type} via ${s.tool} (${s.fromChain}→${s.toChain})`),
+            warnings: executionPlan.warnings,
+            readyToExecute: executionPlan.readyToExecute,
+            note: 'Execution requires wallet connection and transaction signing'
+          };
+          taskType = 'cross_chain_swap';
+          summary = executionPlan.readyToExecute 
+            ? `⚡ Route ready: ${summary_exec.route} - Est. time: ${summary_exec.estimatedTime}, Gas: ${summary_exec.gasCost}`
+            : `⚠️ Route not ready: ${executionPlan.warnings[0] || 'Check route parameters'}`;
+        } catch (error: any) {
+          console.error('Route preparation error:', error);
+          result = { 
+            type: 'cross_chain_swap',
+            route: 'N/A',
+            status: 'ERROR',
+            error: error.message
+          };
+          taskType = 'cross_chain_swap';
+          summary = `Route preparation failed: ${error.message}`;
+        }
       } else {
         // Route Strategist - Strategic coordination
         const analysis = await geminiService.chat({
