@@ -10,10 +10,12 @@ import { AgentDialogue } from './components/AgentDialogue';
 import { OperationsDashboard } from './components/OperationsDashboard';
 import { AgentProgressBar } from './components/AgentProgressBar';
 import { CaptainControlPanel } from './components/CaptainControlPanel';
+import { IntentChat } from './components/IntentChat';
 import LandingPage from './components/LandingPage';
 import { Activity } from 'lucide-react';
 import { orchestrator, agentStatusManager, geminiService } from './services/api';
 import { authService } from './services/auth';
+import { parseIntent } from './services/intentParser';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import './toast-custom.css';
@@ -82,6 +84,16 @@ const App: React.FC = () => {
   
   // --- Commander Custom Order ---
   const [commanderCustomOrder, setCommanderCustomOrder] = useState<string>('');
+  
+  // --- Intent Chat State ---
+  const [chatMessages, setChatMessages] = useState<Array<{
+    id: string;
+    type: 'user' | 'system' | 'agent';
+    content: string;
+    timestamp: number;
+    agentName?: string;
+  }>>([]);
+  const [isProcessingIntent, setIsProcessingIntent] = useState(false);
   
   // --- Persist taskResults to localStorage ---
   useEffect(() => {
@@ -495,6 +507,80 @@ const App: React.FC = () => {
     }
   }, [operationMode, activeAgents, executeAgentTask, addLog]);
 
+  // Handle intent submission
+  const handleIntentSubmit = useCallback(async (intent: string) => {
+    // Add user message
+    const userMessage = {
+      id: `msg_${Date.now()}_user`,
+      type: 'user' as const,
+      content: intent,
+      timestamp: Date.now()
+    };
+    setChatMessages(prev => [...prev, userMessage]);
+    setIsProcessingIntent(true);
+    
+    // Parse intent
+    const analysis = parseIntent(intent);
+    
+    // Add system message
+    setTimeout(() => {
+      const systemMessage = {
+        id: `msg_${Date.now()}_system`,
+        type: 'system' as const,
+        content: analysis.description,
+        timestamp: Date.now()
+      };
+      setChatMessages(prev => [...prev, systemMessage]);
+      
+      // Activate required agents
+      const agentsToActivate = analysis.requiredAgents.filter(id => !activeAgents.includes(id));
+      
+      if (agentsToActivate.length > 0) {
+        agentsToActivate.forEach(agentId => {
+          const agent = AGENTS.find(a => a.id === agentId);
+          if (agent) {
+            handleActivateAgent(agentId);
+            addLog('SYSTEM', `🤖 Auto-activated ${agent.name} for intent execution`);
+          }
+        });
+      }
+      
+      // Create connections
+      const newConnections = [...persistentEdges];
+      analysis.connections.forEach(conn => {
+        const exists = newConnections.some(
+          e => e.source === conn.source && e.target === conn.target
+        );
+        if (!exists) {
+          newConnections.push(conn);
+        }
+      });
+      
+      setPersistentEdges(newConnections);
+      localStorage.setItem('agentConnections', JSON.stringify(newConnections));
+      
+      // Add agent confirmation messages
+      setTimeout(() => {
+        analysis.requiredAgents.forEach(agentId => {
+          const agent = AGENTS.find(a => a.id === agentId);
+          if (agent) {
+            const agentMessage = {
+              id: `msg_${Date.now()}_${agentId}`,
+              type: 'agent' as const,
+              content: `✅ ${agent.name} connected and ready. Workflow configured.`,
+              timestamp: Date.now(),
+              agentName: agent.name
+            };
+            setChatMessages(prev => [...prev, agentMessage]);
+          }
+        });
+        
+        setIsProcessingIntent(false);
+        toast.success('Workflow connected! Agents are ready.');
+      }, 1000);
+    }, 500);
+  }, [activeAgents, persistentEdges, handleActivateAgent, addLog, setPersistentEdges]);
+  
   // Get selected agent
   const selectedAgent = selectedAgentId ? AGENTS.find(a => a.id === selectedAgentId) || null : null;
 
@@ -608,16 +694,32 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Sidebar: Details Panel */}
-        <AgentDetailPanel
-          agent={selectedAgent}
-          onClose={() => setSelectedAgentId(null)}
-          onActivate={handleActivateAgent}
-          onDeactivate={handleDeactivateAgent}
-          onExecuteTask={executeAgentTask}
-          onDeleteAgent={handleDeleteAgent}
-          isActive={selectedAgent ? activeAgents.includes(selectedAgent.id) : false}
-        />
+        {/* Right Side: Intent Chat & Details Panel */}
+        <div className="w-96 flex flex-col border-l border-white/10 overflow-hidden">
+          {/* Intent Chat - Takes remaining space */}
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <IntentChat
+              onIntentSubmit={handleIntentSubmit}
+              messages={chatMessages}
+              isProcessing={isProcessingIntent}
+            />
+          </div>
+          
+          {/* Details Panel (when agent selected) - Fixed height */}
+          {selectedAgent && (
+            <div className="h-96 border-t border-white/10 overflow-hidden flex-shrink-0">
+              <AgentDetailPanel
+                agent={selectedAgent}
+                onClose={() => setSelectedAgentId(null)}
+                onActivate={handleActivateAgent}
+                onDeactivate={handleDeactivateAgent}
+                onExecuteTask={executeAgentTask}
+                onDeleteAgent={handleDeleteAgent}
+                isActive={activeAgents.includes(selectedAgent.id)}
+              />
+            </div>
+          )}
+        </div>
 
         {/* Floating Action Button - Operations Dashboard */}
         {taskResults.length > 0 && !showOperationsDashboard && (

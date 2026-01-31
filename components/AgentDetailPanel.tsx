@@ -34,7 +34,7 @@ const AgentDetailPanel: React.FC<AgentDetailPanelProps> = ({
   };
 
   return (
-    <div className="absolute right-0 top-10 bottom-0 w-96 bg-black/95 border-l border-neon-green/30 backdrop-blur-xl shadow-2xl z-[60] transform transition-transform duration-300 flex flex-col">
+    <div className="h-full w-full bg-black/95 border-l border-neon-green/30 backdrop-blur-xl shadow-2xl flex flex-col">
       <div className="p-4 border-b border-white/10 flex items-center justify-between bg-neon-green/5">
         <h2 className="text-neon-green font-bold font-mono">AGENT DETAILS</h2>
         <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
