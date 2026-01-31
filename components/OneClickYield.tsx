@@ -1,8 +1,8 @@
-// One-Click Yield Rotation Component
-// Real cross-chain yield optimization with wallet signing
+// One-Click Yield Rotation Component with Auto-Execution
+// Real cross-chain yield optimization with wallet signing and auto-monitoring
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useAccount, useWalletClient, useChainId, useSwitchChain } from 'wagmi';
+import { useAccount, useWalletClient, useChainId } from 'wagmi';
 import { 
   Zap, 
   TrendingUp, 
@@ -14,12 +14,16 @@ import {
   RefreshCw,
   ExternalLink,
   Settings,
-  Info
+  Info,
+  Play,
+  Square,
+  Clock,
+  History,
+  Activity,
+  Bot
 } from 'lucide-react';
 import { Address } from 'viem';
 import {
-  getWalletPositions,
-  fetchYieldOpportunities,
   findBestRotation,
   oneClickYieldRotation,
   Position,
@@ -27,18 +31,22 @@ import {
   RotationPlan,
   SUPPORTED_CHAINS,
 } from '../services/yieldRotation';
+import {
+  autoYieldMonitor,
+  MonitorState,
+  ExecutionRecord,
+} from '../services/autoYieldMonitor';
 
 interface OneClickYieldProps {
   onLog?: (message: string, type?: 'info' | 'success' | 'error') => void;
 }
 
-type ViewMode = 'overview' | 'scanning' | 'plan' | 'executing' | 'success' | 'error';
+type ViewMode = 'overview' | 'scanning' | 'plan' | 'executing' | 'success' | 'error' | 'auto' | 'history';
 
 export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
   const { address, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
   const chainId = useChainId();
-  const { switchChain } = useSwitchChain();
   
   // State
   const [viewMode, setViewMode] = useState<ViewMode>('overview');
@@ -52,18 +60,79 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
   const [txHash, setTxHash] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   
+  // Auto-mode state
+  const [monitorState, setMonitorState] = useState<MonitorState | null>(null);
+  const [isAutoMode, setIsAutoMode] = useState(false);
+  
   // Settings
   const [minApyImprovement, setMinApyImprovement] = useState(2);
   const [maxGasCost, setMaxGasCost] = useState(50);
+  const [minPositionValue, setMinPositionValue] = useState(100);
+  const [checkInterval, setCheckInterval] = useState(60);
   const [showSettings, setShowSettings] = useState(false);
+  
+  // Initialize auto-monitor callbacks
+  useEffect(() => {
+    autoYieldMonitor.setCallbacks(
+      (status, type) => {
+        setStatusMessage(status);
+        onLog?.(status, type as any);
+      },
+      (state) => {
+        setMonitorState(state);
+        setIsAutoMode(state.isRunning);
+        if (state.currentPositions.length > 0) {
+          setPositions(state.currentPositions);
+        }
+        if (state.pendingPlan) {
+          setBestPlan(state.pendingPlan);
+        }
+      }
+    );
+    
+    // Load initial state
+    setMonitorState(autoYieldMonitor.getState());
+    const config = autoYieldMonitor.getConfig();
+    setMinApyImprovement(config.minApyImprovement);
+    setMaxGasCost(config.maxGasCost);
+    setMinPositionValue(config.minPositionValue);
+    setCheckInterval(config.checkIntervalMs / 1000);
+  }, [onLog]);
   
   // Detect testnet
   useEffect(() => {
     const testnetChains = SUPPORTED_CHAINS.testnet.map(c => c.id);
     setIsTestnet(testnetChains.includes(chainId));
+    autoYieldMonitor.updateConfig({ isTestnet: testnetChains.includes(chainId) });
   }, [chainId]);
   
-  // Scan for positions and opportunities
+  // Start auto-mode
+  const handleStartAuto = useCallback(async () => {
+    if (!address || !walletClient) {
+      onLog?.('Wallet not connected', 'error');
+      return;
+    }
+    
+    // Update config before starting
+    autoYieldMonitor.updateConfig({
+      minApyImprovement,
+      maxGasCost,
+      minPositionValue,
+      checkIntervalMs: checkInterval * 1000,
+      isTestnet,
+    });
+    
+    await autoYieldMonitor.start(address as Address, walletClient);
+    setViewMode('auto');
+  }, [address, walletClient, minApyImprovement, maxGasCost, minPositionValue, checkInterval, isTestnet, onLog]);
+  
+  // Stop auto-mode
+  const handleStopAuto = useCallback(() => {
+    autoYieldMonitor.stop();
+    setViewMode('overview');
+  }, []);
+  
+  // Manual scan
   const handleScan = useCallback(async () => {
     if (!address) return;
     
@@ -103,7 +172,7 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
     }
   }, [address, minApyImprovement, isTestnet, onLog]);
   
-  // Execute the yield rotation
+  // Execute rotation
   const handleExecute = useCallback(async () => {
     if (!address || !walletClient || !bestPlan) return;
     
@@ -145,7 +214,7 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
     }
   }, [address, walletClient, bestPlan, isTestnet, minApyImprovement, maxGasCost, onLog]);
   
-  // Reset to initial state
+  // Reset
   const handleReset = () => {
     setViewMode('overview');
     setPositions([]);
@@ -157,7 +226,7 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
     setStatusMessage('');
   };
   
-  // Format USD value
+  // Format helpers
   const formatUsd = (value: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -167,7 +236,10 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
     }).format(value);
   };
   
-  // Get explorer URL for tx
+  const formatTime = (timestamp: number) => {
+    return new Date(timestamp).toLocaleTimeString();
+  };
+  
   const getExplorerUrl = (hash: string, chainId: number) => {
     const explorers: Record<number, string> = {
       1: 'https://etherscan.io/tx/',
@@ -213,27 +285,57 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
       {/* Header */}
       <div className="p-4 border-b border-white/10 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-neon-green/20 rounded-full flex items-center justify-center">
-            <Zap className="text-neon-green" size={20} />
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+            isAutoMode ? 'bg-purple-500/20' : 'bg-neon-green/20'
+          }`}>
+            {isAutoMode ? (
+              <Bot className="text-purple-400 animate-pulse" size={20} />
+            ) : (
+              <Zap className="text-neon-green" size={20} />
+            )}
           </div>
           <div>
-            <h3 className="text-white font-bold text-lg">One-Click Yield Rotation</h3>
+            <h3 className="text-white font-bold text-lg">
+              {isAutoMode ? 'Auto-Yield Monitor' : 'One-Click Yield Rotation'}
+            </h3>
             <p className="text-gray-400 text-sm font-mono">
-              {isTestnet ? '🧪 Testnet Mode' : '🌐 Mainnet'}
+              {isTestnet ? '🧪 Testnet' : '🌐 Mainnet'} 
+              {isAutoMode && monitorState && (
+                <span className="ml-2 text-purple-400">
+                  • {monitorState.checksCount} checks • {monitorState.executionsCount} executions
+                </span>
+              )}
             </p>
           </div>
         </div>
         
         <div className="flex items-center gap-2">
+          {/* History button */}
+          {monitorState && monitorState.executionHistory.length > 0 && (
+            <button
+              onClick={() => setViewMode(viewMode === 'history' ? 'overview' : 'history')}
+              className={`p-2 rounded-lg transition-colors ${
+                viewMode === 'history' ? 'bg-purple-500/20 text-purple-400' : 'hover:bg-white/10 text-gray-400'
+              }`}
+              title="Execution History"
+            >
+              <History size={18} />
+            </button>
+          )}
+          
+          {/* Settings button */}
           <button
             onClick={() => setShowSettings(!showSettings)}
-            className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+            className={`p-2 rounded-lg transition-colors ${
+              showSettings ? 'bg-neon-green/20 text-neon-green' : 'hover:bg-white/10 text-gray-400'
+            }`}
             title="Settings"
           >
-            <Settings size={18} className="text-gray-400" />
+            <Settings size={18} />
           </button>
           
-          {viewMode !== 'overview' && viewMode !== 'scanning' && (
+          {/* Reset button */}
+          {viewMode !== 'overview' && viewMode !== 'auto' && !isAutoMode && (
             <button
               onClick={handleReset}
               className="p-2 hover:bg-white/10 rounded-lg transition-colors"
@@ -245,10 +347,34 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
         </div>
       </div>
       
+      {/* Auto-Mode Status Bar */}
+      {isAutoMode && monitorState && (
+        <div className="px-4 py-2 bg-purple-500/10 border-b border-purple-500/20 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Activity className="text-purple-400 animate-pulse" size={16} />
+            <span className="text-purple-400 text-sm font-mono">
+              Auto-monitoring active
+            </span>
+            {monitorState.lastCheck && (
+              <span className="text-purple-400/60 text-xs">
+                Last check: {formatTime(monitorState.lastCheck)}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={handleStopAuto}
+            className="flex items-center gap-1 px-2 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded text-xs font-mono transition-colors"
+          >
+            <Square size={12} />
+            STOP
+          </button>
+        </div>
+      )}
+      
       {/* Settings Panel */}
       {showSettings && (
         <div className="p-4 bg-white/5 border-b border-white/10">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-gray-400 font-mono uppercase mb-1 block">
                 Min APY Improvement (%)
@@ -277,25 +403,125 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
                 step="5"
               />
             </div>
+            <div>
+              <label className="text-xs text-gray-400 font-mono uppercase mb-1 block">
+                Min Position Value ($)
+              </label>
+              <input
+                type="number"
+                value={minPositionValue}
+                onChange={(e) => setMinPositionValue(Number(e.target.value))}
+                className="w-full bg-black/30 border border-white/20 rounded px-3 py-2 text-white text-sm"
+                min="10"
+                max="10000"
+                step="10"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 font-mono uppercase mb-1 block">
+                Check Interval (sec)
+              </label>
+              <input
+                type="number"
+                value={checkInterval}
+                onChange={(e) => setCheckInterval(Number(e.target.value))}
+                className="w-full bg-black/30 border border-white/20 rounded px-3 py-2 text-white text-sm"
+                min="30"
+                max="600"
+                step="30"
+              />
+            </div>
           </div>
         </div>
       )}
       
       {/* Content */}
       <div className="p-4">
+        {/* History View */}
+        {viewMode === 'history' && monitorState && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-white font-medium">Execution History</h4>
+              <button
+                onClick={() => {
+                  autoYieldMonitor.clearHistory();
+                  setViewMode('overview');
+                }}
+                className="text-xs text-red-400 hover:text-red-300"
+              >
+                Clear
+              </button>
+            </div>
+            
+            {monitorState.executionHistory.length === 0 ? (
+              <p className="text-gray-400 text-sm text-center py-4">No executions yet</p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {[...monitorState.executionHistory].reverse().map((record) => (
+                  <div
+                    key={record.id}
+                    className={`p-3 rounded-lg border ${
+                      record.success 
+                        ? 'bg-green-500/10 border-green-500/30' 
+                        : 'bg-red-500/10 border-red-500/30'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-gray-400 font-mono">
+                        {new Date(record.timestamp).toLocaleString()}
+                      </span>
+                      {record.success ? (
+                        <CheckCircle size={14} className="text-green-400" />
+                      ) : (
+                        <AlertCircle size={14} className="text-red-400" />
+                      )}
+                    </div>
+                    <div className="text-sm text-white">
+                      {record.plan.fromPosition.token} → {record.plan.toOpportunity.protocol}
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      +{record.plan.apyImprovement.toFixed(2)}% APY
+                    </div>
+                    {record.txHash && (
+                      <a
+                        href={getExplorerUrl(record.txHash, record.plan.toOpportunity.chainId)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-neon-green hover:underline flex items-center gap-1 mt-1"
+                      >
+                        View TX <ExternalLink size={10} />
+                      </a>
+                    )}
+                    {record.error && (
+                      <p className="text-xs text-red-400 mt-1">{record.error}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            <button
+              onClick={() => setViewMode('overview')}
+              className="w-full bg-white/10 hover:bg-white/20 text-white py-2 rounded-lg transition-colors text-sm"
+            >
+              Back
+            </button>
+          </div>
+        )}
+        
         {/* Overview / Initial State */}
-        {viewMode === 'overview' && (
+        {viewMode === 'overview' && !isAutoMode && (
           <div className="space-y-4">
             <div className="bg-white/5 rounded-lg p-4">
               <div className="flex items-start gap-3">
                 <Info className="text-neon-green mt-0.5" size={18} />
                 <div>
                   <p className="text-white text-sm">
-                    This will scan your wallet across {isTestnet ? 'testnet' : 'all supported'} chains, 
-                    find the best yield opportunities, and execute a cross-chain transfer via LI.FI.
+                    Scan your wallet or enable <span className="text-purple-400 font-medium">Auto Mode</span> for 
+                    hands-free yield optimization across chains.
                   </p>
                   <p className="text-gray-400 text-xs mt-2">
-                    Supports: USDC, USDT, DAI, WETH across Ethereum, Arbitrum, Optimism, Polygon, Base
+                    Supports: USDC, USDT, DAI, WETH on Ethereum, Arbitrum, Optimism, Polygon, Base
                   </p>
                 </div>
               </div>
@@ -319,20 +545,102 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
               </div>
             )}
             
-            <button
-              onClick={handleScan}
-              disabled={isLoading}
-              className="w-full bg-neon-green hover:bg-neon-green/80 text-black font-bold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
-            >
-              {isLoading ? (
-                <Loader2 className="animate-spin" size={20} />
-              ) : (
-                <>
-                  <TrendingUp size={20} />
-                  Scan for Opportunities
-                </>
-              )}
-            </button>
+            {/* Action Buttons */}
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={handleScan}
+                disabled={isLoading}
+                className="bg-neon-green hover:bg-neon-green/80 text-black font-bold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                {isLoading ? (
+                  <Loader2 className="animate-spin" size={20} />
+                ) : (
+                  <>
+                    <TrendingUp size={20} />
+                    Manual Scan
+                  </>
+                )}
+              </button>
+              
+              <button
+                onClick={handleStartAuto}
+                disabled={isLoading}
+                className="bg-purple-500 hover:bg-purple-500/80 text-white font-bold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                <Play size={20} />
+                Auto Mode
+              </button>
+            </div>
+          </div>
+        )}
+        
+        {/* Auto Mode Running */}
+        {(viewMode === 'auto' || isAutoMode) && viewMode !== 'history' && (
+          <div className="space-y-4">
+            {/* Status */}
+            <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <Bot className="text-purple-400 animate-pulse" size={24} />
+                <div>
+                  <p className="text-white font-medium">Auto-Yield Monitor Running</p>
+                  <p className="text-purple-400/70 text-sm">{statusMessage || 'Monitoring for opportunities...'}</p>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="bg-black/30 rounded p-2">
+                  <p className="text-2xl text-white font-bold">{monitorState?.checksCount || 0}</p>
+                  <p className="text-xs text-gray-400">Checks</p>
+                </div>
+                <div className="bg-black/30 rounded p-2">
+                  <p className="text-2xl text-white font-bold">{monitorState?.executionsCount || 0}</p>
+                  <p className="text-xs text-gray-400">Executions</p>
+                </div>
+                <div className="bg-black/30 rounded p-2">
+                  <p className="text-2xl text-white font-bold">{positions.length}</p>
+                  <p className="text-xs text-gray-400">Positions</p>
+                </div>
+              </div>
+            </div>
+            
+            {/* Current positions */}
+            {positions.length > 0 && (
+              <div>
+                <h4 className="text-sm text-gray-400 font-mono uppercase mb-2">Tracked Positions</h4>
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {positions.map((pos, i) => (
+                    <div key={i} className="flex items-center justify-between bg-white/5 rounded px-3 py-1.5 text-sm">
+                      <span className="text-white font-mono">{pos.token}</span>
+                      <span className="text-gray-400">{pos.chainName}</span>
+                      <span className="text-neon-green font-mono">{parseFloat(pos.balanceFormatted).toFixed(4)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Pending Plan */}
+            {bestPlan && (
+              <div className="bg-neon-green/10 border border-neon-green/30 rounded-lg p-3">
+                <h4 className="text-xs text-neon-green font-mono uppercase mb-2">Pending Opportunity</h4>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-white font-medium">{bestPlan.toOpportunity.protocol}</p>
+                    <p className="text-gray-400 text-sm">{bestPlan.toOpportunity.chainName}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-neon-green font-bold">+{bestPlan.apyImprovement.toFixed(2)}%</p>
+                    <p className="text-gray-400 text-xs">APY improvement</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Config Summary */}
+            <div className="text-xs text-gray-500 font-mono">
+              <Clock size={12} className="inline mr-1" />
+              Check every {checkInterval}s • Min APY: {minApyImprovement}% • Max Gas: ${maxGasCost}
+            </div>
           </div>
         )}
         
@@ -361,10 +669,6 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
                   <p className="text-gray-400 text-sm">{formatUsd(bestPlan.fromPosition.valueUsd)}</p>
                 </div>
               </div>
-              <div className="mt-2 text-sm">
-                <span className="text-gray-500">Current APY: </span>
-                <span className="text-yellow-400">{bestPlan.fromPosition.currentApy.toFixed(2)}%</span>
-              </div>
             </div>
             
             {/* Arrow */}
@@ -386,13 +690,6 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
                   <p className="text-neon-green font-bold text-xl">{bestPlan.toOpportunity.apy.toFixed(2)}% APY</p>
                   <p className="text-gray-400 text-sm">TVL: {formatUsd(bestPlan.toOpportunity.tvl)}</p>
                 </div>
-              </div>
-              <div className={`mt-2 inline-block px-2 py-0.5 rounded text-xs font-medium ${
-                bestPlan.toOpportunity.risk === 'low' ? 'bg-green-500/20 text-green-400' :
-                bestPlan.toOpportunity.risk === 'medium' ? 'bg-yellow-500/20 text-yellow-400' :
-                'bg-red-500/20 text-red-400'
-              }`}>
-                {bestPlan.toOpportunity.risk.toUpperCase()} RISK
               </div>
             </div>
             
@@ -416,12 +713,6 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
                   {formatUsd(bestPlan.netBenefit)}
                 </span>
               </div>
-              {bestPlan.breakEvenDays > 0 && (
-                <div className="flex justify-between text-xs text-gray-500">
-                  <span>Break-even</span>
-                  <span>{Math.ceil(bestPlan.breakEvenDays)} days</span>
-                </div>
-              )}
             </div>
             
             {/* Execute Button */}
@@ -435,28 +726,10 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
               ) : (
                 <>
                   <Zap size={20} />
-                  Execute Rotation via LI.FI
+                  Execute via LI.FI
                 </>
               )}
             </button>
-            
-            {/* Other opportunities */}
-            {allPlans.length > 1 && (
-              <details className="group">
-                <summary className="text-gray-400 text-sm cursor-pointer hover:text-white">
-                  View {allPlans.length - 1} other opportunities
-                </summary>
-                <div className="mt-2 space-y-2 max-h-48 overflow-y-auto">
-                  {allPlans.slice(1).map((plan, i) => (
-                    <div key={i} className="bg-white/5 rounded px-3 py-2 flex items-center justify-between text-sm">
-                      <span className="text-white">{plan.toOpportunity.protocol}</span>
-                      <span className="text-gray-400">{plan.toOpportunity.chainName}</span>
-                      <span className="text-neon-green">+{plan.apyImprovement.toFixed(2)}%</span>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            )}
           </div>
         )}
         
