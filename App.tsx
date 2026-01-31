@@ -13,8 +13,12 @@ import { AgentProgressBar } from './components/AgentProgressBar';
 import { CaptainControlPanel } from './components/CaptainControlPanel';
 import { IntentChat } from './components/IntentChat';
 import { OneClickYield } from './components/OneClickYield';
+import { ArbitrageExecutor } from './components/ArbitrageExecutor';
+import { NotificationSettings } from './components/NotificationSettings';
+import { TransactionHistory } from './components/TransactionHistory';
+import { MultiWalletManager } from './components/MultiWalletManager';
 import LandingPage from './components/LandingPage';
-import { Activity, Zap } from 'lucide-react';
+import { Activity, Zap, ArrowRightLeft, Bell, History, Wallet } from 'lucide-react';
 import { orchestrator, agentStatusManager, geminiService } from './services/api';
 import { authService } from './services/auth';
 import { parseIntent } from './services/intentParser';
@@ -42,7 +46,7 @@ const App: React.FC = () => {
   }, [isConnected, connectedAddress]);
 
   const [showLanding, setShowLanding] = useState<boolean>(true);
-  const [rightPanelView, setRightPanelView] = useState<'chat' | 'yield'>('chat');
+  const [rightPanelView, setRightPanelView] = useState<'chat' | 'yield' | 'arbitrage' | 'alerts' | 'history' | 'wallets'>('chat');
   
   // --- State ---
   const [activeAgents, setActiveAgents] = useState<string[]>(() => {
@@ -991,6 +995,50 @@ const App: React.FC = () => {
               <Zap size={14} />
               YIELD
             </button>
+            <button
+              onClick={() => setRightPanelView('arbitrage')}
+              className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${
+                rightPanelView === 'arbitrage' 
+                  ? 'bg-cyan-500/10 text-cyan-400 border-b-2 border-cyan-400' 
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <ArrowRightLeft size={14} />
+              ARB
+            </button>
+            <button
+              onClick={() => setRightPanelView('alerts')}
+              className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${
+                rightPanelView === 'alerts' 
+                  ? 'bg-orange-500/10 text-orange-400 border-b-2 border-orange-400' 
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Bell size={14} />
+              24/7
+            </button>
+            <button
+              onClick={() => setRightPanelView('history')}
+              className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${
+                rightPanelView === 'history' 
+                  ? 'bg-yellow-500/10 text-yellow-400 border-b-2 border-yellow-400' 
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <History size={14} />
+              TXS
+            </button>
+            <button
+              onClick={() => setRightPanelView('wallets')}
+              className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${
+                rightPanelView === 'wallets' 
+                  ? 'bg-purple-500/10 text-purple-400 border-b-2 border-purple-400' 
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Wallet size={14} />
+              👛
+            </button>
           </div>
           
           {/* Panel Content - Takes remaining space */}
@@ -1001,11 +1049,63 @@ const App: React.FC = () => {
                 messages={chatMessages}
                 isProcessing={isProcessingIntent}
               />
-            ) : (
+            ) : rightPanelView === 'yield' ? (
               <div className="h-full overflow-y-auto p-3">
                 <OneClickYield 
                   onLog={(message, type) => {
                     addLog('YIELD', message);
+                    if (type === 'success') {
+                      toast.success(message, { position: 'bottom-right' });
+                    } else if (type === 'error') {
+                      toast.error(message, { position: 'bottom-right' });
+                    }
+                  }}
+                />
+              </div>
+            ) : rightPanelView === 'arbitrage' ? (
+              <div className="h-full overflow-y-auto p-3">
+                <ArbitrageExecutor 
+                  onLog={(message, type) => {
+                    addLog('ARB', message);
+                    if (type === 'success') {
+                      toast.success(message, { position: 'bottom-right' });
+                    } else if (type === 'error') {
+                      toast.error(message, { position: 'bottom-right' });
+                    }
+                  }}
+                />
+              </div>
+            ) : rightPanelView === 'alerts' ? (
+              <div className="h-full overflow-y-auto p-3">
+                <NotificationSettings 
+                  onLog={(message, type) => {
+                    addLog('ALERTS', message);
+                    if (type === 'success') {
+                      toast.success(message, { position: 'bottom-right' });
+                    } else if (type === 'error') {
+                      toast.error(message, { position: 'bottom-right' });
+                    }
+                  }}
+                />
+              </div>
+            ) : rightPanelView === 'history' ? (
+              <div className="h-full overflow-y-auto p-3">
+                <TransactionHistory 
+                  onLog={(message, type) => {
+                    addLog('HISTORY', message);
+                    if (type === 'success') {
+                      toast.success(message, { position: 'bottom-right' });
+                    } else if (type === 'error') {
+                      toast.error(message, { position: 'bottom-right' });
+                    }
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="h-full overflow-y-auto p-3">
+                <MultiWalletManager 
+                  onLog={(message, type) => {
+                    addLog('WALLET', message);
                     if (type === 'success') {
                       toast.success(message, { position: 'bottom-right' });
                     } else if (type === 'error') {
