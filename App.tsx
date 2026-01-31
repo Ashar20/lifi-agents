@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useAccount } from 'wagmi';
 import { AGENTS, INITIAL_LOGS, AGENT_ABILITIES } from './constants';
 import { AgentMetadata, LogMessage, AgentTaskResult } from './types';
 import UserBar from './components/UserBar';
@@ -11,8 +12,9 @@ import { OperationsDashboard } from './components/OperationsDashboard';
 import { AgentProgressBar } from './components/AgentProgressBar';
 import { CaptainControlPanel } from './components/CaptainControlPanel';
 import { IntentChat } from './components/IntentChat';
+import { OneClickYield } from './components/OneClickYield';
 import LandingPage from './components/LandingPage';
-import { Activity } from 'lucide-react';
+import { Activity, Zap } from 'lucide-react';
 import { orchestrator, agentStatusManager, geminiService } from './services/api';
 import { authService } from './services/auth';
 import { parseIntent } from './services/intentParser';
@@ -21,6 +23,9 @@ import 'react-toastify/dist/ReactToastify.css';
 import './toast-custom.css';
 
 const App: React.FC = () => {
+  // Wagmi wallet connection
+  const { address: connectedAddress, isConnected } = useAccount();
+  
   // Auto-create guest session on first load
   useEffect(() => {
     if (!authService.isAuthenticated()) {
@@ -28,7 +33,16 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Auto-save connected wallet address for agents to use
+  useEffect(() => {
+    if (isConnected && connectedAddress) {
+      localStorage.setItem('trackedWalletAddress', connectedAddress);
+      addLog('SYSTEM', `🔗 Wallet connected: ${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-4)}`);
+    }
+  }, [isConnected, connectedAddress]);
+
   const [showLanding, setShowLanding] = useState<boolean>(true);
+  const [rightPanelView, setRightPanelView] = useState<'chat' | 'yield'>('chat');
   
   // --- State ---
   const [activeAgents, setActiveAgents] = useState<string[]>(() => {
@@ -952,15 +966,55 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Side: Intent Chat & Details Panel */}
+        {/* Right Side: Intent Chat / Yield Rotation & Details Panel */}
         <div className="w-96 flex flex-col border-l border-white/10 overflow-hidden">
-          {/* Intent Chat - Takes remaining space */}
+          {/* Tab Buttons */}
+          <div className="flex border-b border-white/10 bg-black/40">
+            <button
+              onClick={() => setRightPanelView('chat')}
+              className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${
+                rightPanelView === 'chat' 
+                  ? 'bg-neon-green/10 text-neon-green border-b-2 border-neon-green' 
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              INTENT CHAT
+            </button>
+            <button
+              onClick={() => setRightPanelView('yield')}
+              className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${
+                rightPanelView === 'yield' 
+                  ? 'bg-neon-green/10 text-neon-green border-b-2 border-neon-green' 
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Zap size={14} />
+              YIELD
+            </button>
+          </div>
+          
+          {/* Panel Content - Takes remaining space */}
           <div className="flex-1 min-h-0 overflow-hidden">
-            <IntentChat
-              onIntentSubmit={handleIntentSubmit}
-              messages={chatMessages}
-              isProcessing={isProcessingIntent}
-            />
+            {rightPanelView === 'chat' ? (
+              <IntentChat
+                onIntentSubmit={handleIntentSubmit}
+                messages={chatMessages}
+                isProcessing={isProcessingIntent}
+              />
+            ) : (
+              <div className="h-full overflow-y-auto p-3">
+                <OneClickYield 
+                  onLog={(message, type) => {
+                    addLog('YIELD', message);
+                    if (type === 'success') {
+                      toast.success(message, { position: 'bottom-right' });
+                    } else if (type === 'error') {
+                      toast.error(message, { position: 'bottom-right' });
+                    }
+                  }}
+                />
+              </div>
+            )}
           </div>
           
           {/* Details Panel (when agent selected) - Fixed height */}

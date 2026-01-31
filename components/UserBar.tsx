@@ -1,6 +1,7 @@
 import React from 'react';
-import { User, LogOut } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { authService } from '../services/auth';
+import { WalletConnect } from './WalletConnect';
 
 interface UserBarProps {
   onLogoClick?: () => void;
@@ -32,28 +33,22 @@ const UserBar: React.FC<UserBarProps> = ({ onLogoClick, onLogout }) => {
           </div>
         </button>
 
-        {/* User Info */}
-        {user && (
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 bg-white/5 px-4 py-2 rounded border border-white/10">
-              <User size={16} className="text-neon-green" />
-              <span className="text-white font-medium text-sm">{user.username}</span>
-              {user.isGuest && (
-                <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded">
-                  Guest
-                </span>
-              )}
-            </div>
+        {/* Right Side: Wallet + User */}
+        <div className="flex items-center gap-4">
+          {/* Wallet Connection */}
+          <WalletConnect />
 
+          {/* User Info & Logout */}
+          {user && (
             <button
               onClick={handleLogout}
-              className="flex items-center gap-2 bg-red-500/10 hover:bg-red-500/20 px-4 py-2 rounded border border-red-500/30 transition-colors"
+              className="flex items-center gap-2 bg-red-500/10 hover:bg-red-500/20 px-3 py-2 rounded border border-red-500/30 transition-colors"
+              title={`Logged in as ${user.username}`}
             >
               <LogOut size={16} className="text-red-400" />
-              <span className="text-red-400 font-medium text-sm">Logout</span>
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
