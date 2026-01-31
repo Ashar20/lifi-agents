@@ -182,16 +182,47 @@ Focus: Maintain target allocations. Only act if drift > 5%.`;
     };
   }
 
-  // Mock monitoring functions (replace with real data sources)
+  // Real price monitoring - fetches actual DEX prices
   private async monitorPrices(): Promise<any> {
-    // In production: Fetch real DEX prices across chains
-    return {
-      ethPrice: { ethereum: 3000, arbitrum: 2995, optimism: 3002 },
-      usdcPrice: { ethereum: 1.0, arbitrum: 0.9995, polygon: 1.0002 },
-      opportunities: [
-        { fromChain: 1, toChain: 42161, token: 'USDC', profit: 0.5 },
-      ],
-    };
+    try {
+      const { detectArbitrageOpportunities, fetchCrossChainPrices } = await import('./priceFetcher');
+      
+      // Fetch real prices for USDC across chains
+      const usdcPrices = await fetchCrossChainPrices('USDC');
+      
+      // Detect real arbitrage opportunities
+      const opportunities = await detectArbitrageOpportunities('USDC', 0.3, 1000);
+      
+      // Format price data
+      const priceMap: Record<string, number> = {};
+      usdcPrices.forEach(p => {
+        priceMap[p.chainName.toLowerCase()] = p.priceUSD;
+      });
+      
+      return {
+        prices: priceMap,
+        opportunities: opportunities.map(opp => ({
+          fromChain: opp.fromChain,
+          fromChainName: opp.fromChainName,
+          toChain: opp.toChain,
+          toChainName: opp.toChainName,
+          token: opp.tokenSymbol,
+          profit: opp.profitAfterFees,
+          priceDiff: opp.priceDifference,
+          confidence: opp.confidence,
+        })),
+        timestamp: Date.now(),
+        source: 'Real DEX prices',
+      };
+    } catch (error) {
+      console.error('Price monitoring error:', error);
+      // Fallback to empty data if API fails
+      return {
+        prices: {},
+        opportunities: [],
+        error: 'Price fetch failed',
+      };
+    }
   }
 
   private async monitorPortfolio(): Promise<any> {

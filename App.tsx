@@ -307,18 +307,51 @@ const App: React.FC = () => {
       let summary = '';
       
       if (agent.role === 'Navigator') {
-        // Arbitrage Hunter - Price monitoring
-        const analysis = await geminiService.chat({
-          prompt: `As Arbitrage Hunter, analyze cross-chain price differences. Provide a brief opportunity report focusing on: ${taskDescription || 'USDC price differences between Ethereum and Arbitrum'}`
-        });
-        result = { 
-          type: 'arbitrage_detection', 
-          opportunities: ['USDC 0.5% cheaper on Arbitrum', 'ETH price gap detected', 'Triangular arbitrage possible'],
-          profit: '$450',
-          analysis: analysis.text 
-        };
-        taskType = 'arbitrage_detection';
-        summary = `Detected 3 arbitrage opportunities: ${taskDescription || 'USDC price gap, ETH difference, triangular arb'}`;
+        // Arbitrage Hunter - Real price monitoring
+        addLog(agent.name, '🔍 Fetching real-time prices across chains...');
+        
+        const { detectArbitrageOpportunities } = await import('./services/priceFetcher');
+        const opportunities = await detectArbitrageOpportunities('USDC', 0.3, 1000);
+        
+        if (opportunities.length > 0) {
+          const topOpportunity = opportunities[0];
+          const analysis = await geminiService.chat({
+            prompt: `As Arbitrage Hunter, analyze this real arbitrage opportunity: ${topOpportunity.tokenSymbol} price difference of ${topOpportunity.priceDifference.toFixed(2)}% between ${topOpportunity.fromChainName} ($${topOpportunity.fromPrice.toFixed(4)}) and ${topOpportunity.toChainName} ($${topOpportunity.toPrice.toFixed(4)}). Estimated profit: $${topOpportunity.profitAfterFees.toFixed(2)}. Provide a brief analysis.`
+          });
+          
+          result = { 
+            type: 'arbitrage_detection', 
+            opportunities: opportunities.map(opp => 
+              `${opp.tokenSymbol}: ${opp.priceDifference.toFixed(2)}% diff (${opp.fromChainName} → ${opp.toChainName}) - Profit: $${opp.profitAfterFees.toFixed(2)}`
+            ),
+            topOpportunity: {
+              token: topOpportunity.tokenSymbol,
+              fromChain: topOpportunity.fromChainName,
+              toChain: topOpportunity.toChainName,
+              priceDiff: `${topOpportunity.priceDifference.toFixed(2)}%`,
+              profit: `$${topOpportunity.profitAfterFees.toFixed(2)}`,
+              confidence: topOpportunity.confidence
+            },
+            profit: `$${topOpportunity.profitAfterFees.toFixed(2)}`,
+            analysis: analysis.text,
+            totalOpportunities: opportunities.length
+          };
+          taskType = 'arbitrage_detection';
+          summary = `Detected ${opportunities.length} real arbitrage opportunities. Best: ${topOpportunity.priceDifference.toFixed(2)}% price difference (${topOpportunity.fromChainName} → ${topOpportunity.toChainName}) - Profit: $${topOpportunity.profitAfterFees.toFixed(2)}`;
+        } else {
+          // No opportunities found
+          const analysis = await geminiService.chat({
+            prompt: `As Arbitrage Hunter, report that no profitable arbitrage opportunities were found after scanning real prices across Ethereum, Arbitrum, Optimism, Polygon, and Base chains.`
+          });
+          result = { 
+            type: 'arbitrage_detection', 
+            opportunities: [],
+            message: 'No profitable arbitrage opportunities found (after fees)',
+            analysis: analysis.text 
+          };
+          taskType = 'arbitrage_detection';
+          summary = `Scanned real prices across 5 chains. No profitable arbitrage opportunities found (price differences too small after fees).`;
+        }
       } else if (agent.role === 'Archivist') {
         // Portfolio Guardian - Position tracking
         const analysis = await geminiService.chat({
