@@ -1,0 +1,101 @@
+/* Custom toast styles to match LI.FI Agents theme */
+
+.Toastify__toast {
+  background: rgba(0, 0, 0, 0.95) !important;
+  border: 1px solid rgba(57, 255, 20, 0.3) !important;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 20px rgba(57, 255, 20, 0.2);
+  font-family: 'Courier New', monospace;
+}
+
+.Toastify__toast--success {
+  border-color: rgba(57, 255, 20, 0.5) !important;
+}
+
+.Toastify__toast--error {
+  border-color: rgba(255, 71, 87, 0.5) !important;
+}
+
+.Toastify__toast--info {
+  border-color: rgba(99, 102, 241, 0.5) !important;
+}
+
+.Toastify__progress-bar {
+  background: linear-gradient(
+    to right,
+    #39ff14,
+    #00ff88
+  ) !important;
+}
+
+.Toastify__progress-bar--error {
+  background: linear-gradient(
+    to right,
+    #ff4757,
+    #ff6348
+  ) !important;
+}
+
+.Toastify__close-button {
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+.Toastify__close-button:hover {
+  color: #39ff14 !important;
+}
+
+.Toastify__toast-body {
+  color: #ffffff;
+  padding: 8px;
+}
+
+/* Floating animation for dialogue bubbles */
+@keyframes gentle-float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+/* Fade in animation */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-in-out;
+}
+/* ReactFlow Controls styling */
+.react-flow__controls {
+  background: rgba(17, 24, 39, 0.95) !important;
+  border: 1px solid rgba(67, 255, 77, 0.3) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 0 20px rgba(67, 255, 77, 0.2) !important;
+}
+
+.react-flow__controls-button {
+  background: rgba(26, 26, 26, 0.8) !important;
+  border-bottom: 1px solid rgba(67, 255, 77, 0.2) !important;
+  color: #43FF4D !important;
+  transition: all 0.2s ease !important;
+}
+
+.react-flow__controls-button:hover {
+  background: rgba(67, 255, 77, 0.2) !important;
+  color: #43FF4D !important;
+}
+
+.react-flow__controls-button svg {
+  fill: #43FF4D !important;
+}
+
+.react-flow__controls-button:hover svg {
+  fill: #ffffff !important;
+}
