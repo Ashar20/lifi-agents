@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { AgentMetadata } from '../types';
-import { X, Play, Square, Zap, Trash2, RefreshCw } from 'lucide-react';
+import { X, Play, Square, Zap, Trash2, RefreshCw, Wallet } from 'lucide-react';
 import { AGENT_ABILITIES } from '../constants';
 import LottieAvatar from './LottieAvatar';
 
@@ -25,6 +25,18 @@ const AgentDetailPanel: React.FC<AgentDetailPanelProps> = ({
 }) => {
   
   if (!agent) return null;
+
+  // Wallet address input for Portfolio Guardian
+  const [walletAddress, setWalletAddress] = useState(() => {
+    return localStorage.getItem('trackedWalletAddress') || '';
+  });
+  const isPortfolioGuardian = agent.role === 'Archivist';
+
+  useEffect(() => {
+    if (walletAddress) {
+      localStorage.setItem('trackedWalletAddress', walletAddress);
+    }
+  }, [walletAddress]);
 
   const handleDeleteAgent = () => {
     if (window.confirm(`Are you sure you want to delete ${agent.name}? This action cannot be undone.`)) {
@@ -151,6 +163,27 @@ const AgentDetailPanel: React.FC<AgentDetailPanelProps> = ({
                     ))}
                 </div>
             </div>
+
+            {/* Wallet Address Input for Portfolio Guardian */}
+            {isPortfolioGuardian && (
+              <div className="space-y-2">
+                <label className="text-xs text-gray-500 font-mono uppercase flex items-center gap-2">
+                  <Wallet size={12} className="text-neon-green" />
+                  Wallet Address to Track
+                </label>
+                <input
+                  type="text"
+                  value={walletAddress}
+                  onChange={(e) => setWalletAddress(e.target.value)}
+                  placeholder="0x... (leave empty for demo address)"
+                  className="w-full px-3 py-2 bg-black/40 border border-white/20 rounded text-white placeholder-gray-500 focus:border-neon-green focus:outline-none font-mono text-sm"
+                />
+                <p className="text-[10px] text-gray-500 font-mono">
+                  Portfolio Guardian will track balances for this address across all chains. 
+                  {!walletAddress && ' Using demo address if empty.'}
+                </p>
+              </div>
+            )}
 
             {/* API Integrations */}
             {AGENT_ABILITIES[agent.id as keyof typeof AGENT_ABILITIES]?.apis && AGENT_ABILITIES[agent.id as keyof typeof AGENT_ABILITIES].apis.length > 0 && (

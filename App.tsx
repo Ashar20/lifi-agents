@@ -353,20 +353,84 @@ const App: React.FC = () => {
           summary = `Scanned real prices across 5 chains. No profitable arbitrage opportunities found (price differences too small after fees).`;
         }
       } else if (agent.role === 'Archivist') {
-        // Portfolio Guardian - Position tracking
-        const analysis = await geminiService.chat({
-          prompt: `As Portfolio Guardian, analyze cross-chain positions for: ${taskDescription || 'current portfolio allocation across chains'}. Provide position summary and PnL analysis.`
-        });
-        result = { 
-          type: 'position_monitoring', 
-          positions: 12,
-          totalValue: '$5,000',
-          pnl: '+$250',
-          analysis: analysis.text,
-          chains: ['Ethereum', 'Arbitrum', 'Polygon']
-        };
-        taskType = 'position_monitoring';
-        summary = `Tracked ${taskDescription || '12 positions across 3 chains - Total value: $5,000, PnL: +$250'}`;
+        // Portfolio Guardian - Real position tracking
+        addLog(agent.name, '🔍 Querying wallet balances across chains...');
+        
+        // Get wallet address from localStorage, wagmi connection, or use a default demo address
+        let walletAddress = localStorage.getItem('trackedWalletAddress');
+        
+        // Try to get from wagmi if available
+        if (!walletAddress && typeof window !== 'undefined') {
+          try {
+            // Check if wagmi is available and wallet is connected
+            const wagmiState = (window as any).__WAGMI_STATE__;
+            if (wagmiState?.connections?.size > 0) {
+              const connection = Array.from(wagmiState.connections.values())[0] as any;
+              walletAddress = connection?.accounts?.[0];
+            }
+          } catch {
+            // Wagmi not available, continue with fallback
+          }
+        }
+        
+        // Fallback to demo address if still no address
+        if (!walletAddress) {
+          walletAddress = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'; // Vitalik's address as demo
+        }
+        
+        try {
+          const { getPortfolioSummary } = await import('./services/portfolioTracker');
+          const portfolio = await getPortfolioSummary(walletAddress);
+          
+          // Group positions by chain and token
+          const positionsByChain: Record<string, number> = {};
+          const positionsByToken: Record<string, number> = {};
+          
+          portfolio.positions.forEach(pos => {
+            positionsByChain[pos.chainName] = (positionsByChain[pos.chainName] || 0) + pos.valueUSD;
+            positionsByToken[pos.tokenSymbol] = (positionsByToken[pos.tokenSymbol] || 0) + pos.valueUSD;
+          });
+          
+          const analysis = await geminiService.chat({
+            prompt: `As Portfolio Guardian, analyze this real cross-chain portfolio: Total value: $${portfolio.totalValueUSD.toFixed(2)}, ${portfolio.tokenCount} positions across ${portfolio.chains.length} chains (${portfolio.chains.join(', ')}). Positions by token: ${Object.entries(positionsByToken).map(([token, value]) => `${token}: $${value.toFixed(2)}`).join(', ')}. ${portfolio.pnl24h !== undefined ? `24h PnL: ${portfolio.pnl24h >= 0 ? '+' : ''}$${portfolio.pnl24h.toFixed(2)} (${portfolio.pnlPercent !== undefined ? (portfolio.pnlPercent >= 0 ? '+' : '') + portfolio.pnlPercent.toFixed(2) + '%' : 'N/A'})` : ''}. Provide a brief portfolio analysis.`
+          });
+          
+          result = { 
+            type: 'position_monitoring', 
+            positions: portfolio.tokenCount,
+            totalValue: `$${portfolio.totalValueUSD.toFixed(2)}`,
+            pnl: portfolio.pnl24h !== undefined ? `${portfolio.pnl24h >= 0 ? '+' : ''}$${portfolio.pnl24h.toFixed(2)}` : 'N/A',
+            pnlPercent: portfolio.pnlPercent !== undefined ? `${portfolio.pnlPercent >= 0 ? '+' : ''}${portfolio.pnlPercent.toFixed(2)}%` : 'N/A',
+            analysis: analysis.text,
+            chains: portfolio.chains,
+            positionsByChain,
+            positionsByToken,
+            walletAddress: walletAddress.substring(0, 6) + '...' + walletAddress.substring(walletAddress.length - 4),
+            lastUpdated: new Date(portfolio.lastUpdated).toLocaleString()
+          };
+          taskType = 'position_monitoring';
+          summary = `Tracked ${portfolio.tokenCount} real positions across ${portfolio.chains.length} chains - Total value: $${portfolio.totalValueUSD.toFixed(2)}${portfolio.pnl24h !== undefined ? `, PnL: ${portfolio.pnl24h >= 0 ? '+' : ''}$${portfolio.pnl24h.toFixed(2)}` : ''}`;
+        } catch (error: any) {
+          console.error('Portfolio tracking error:', error);
+          addLog('ERROR', `Failed to fetch portfolio: ${error.message}`);
+          
+          // Fallback to analysis only
+          const analysis = await geminiService.chat({
+            prompt: `As Portfolio Guardian, report that portfolio tracking encountered an error: ${error.message}. Suggest checking wallet address and network connectivity.`
+          });
+          
+          result = { 
+            type: 'position_monitoring', 
+            positions: 0,
+            totalValue: '$0.00',
+            pnl: 'N/A',
+            analysis: analysis.text,
+            chains: [],
+            error: error.message
+          };
+          taskType = 'position_monitoring';
+          summary = `Portfolio tracking failed: ${error.message}`;
+        }
       } else if (agent.role === 'Oracle') {
         // Rebalancer - Allocation management
         const analysis = await geminiService.chat({

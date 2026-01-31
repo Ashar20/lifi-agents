@@ -226,15 +226,38 @@ Focus: Maintain target allocations. Only act if drift > 5%.`;
   }
 
   private async monitorPortfolio(): Promise<any> {
-    // In production: Fetch real portfolio positions
-    return {
-      positions: [
-        { chainId: 1, token: 'ETH', balance: '1.0', valueUSD: 3000 },
-        { chainId: 1, token: 'USDC', balance: '2000', valueUSD: 2000 },
-      ],
-      totalValue: 5000,
-      pnl: 250,
-    };
+    try {
+      // Get wallet address from localStorage or use demo address
+      const walletAddress = localStorage.getItem('trackedWalletAddress') || 
+        '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'; // Demo address
+      
+      const { getPortfolioSummary } = await import('./portfolioTracker');
+      const portfolio = await getPortfolioSummary(walletAddress);
+      
+      return {
+        positions: portfolio.positions.map(p => ({
+          chainId: p.chainId,
+          token: p.tokenSymbol,
+          balance: p.balance.toString(),
+          valueUSD: p.valueUSD,
+        })),
+        totalValue: portfolio.totalValueUSD,
+        pnl: portfolio.pnl24h || 0,
+        pnlPercent: portfolio.pnlPercent || 0,
+        chains: portfolio.chains,
+        tokenCount: portfolio.tokenCount,
+        timestamp: portfolio.lastUpdated,
+        source: 'Real blockchain data',
+      };
+    } catch (error) {
+      console.error('Portfolio monitoring error:', error);
+      return {
+        positions: [],
+        totalValue: 0,
+        pnl: 0,
+        error: 'Portfolio fetch failed',
+      };
+    }
   }
 
   private async monitorYields(): Promise<any> {
