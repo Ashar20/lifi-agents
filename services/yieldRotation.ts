@@ -4,6 +4,7 @@
 import { LiFi, ChainId } from '@lifi/sdk';
 import { createPublicClient, http, formatUnits, parseUnits, Address, erc20Abi } from 'viem';
 import { mainnet, arbitrum, optimism, polygon, base, sepolia, arbitrumSepolia, optimismSepolia, baseSepolia } from 'viem/chains';
+import { transactionHistory, getExplorerUrl } from './transactionHistory';
 
 // Initialize LI.FI SDK
 const lifi = new LiFi({
@@ -356,6 +357,29 @@ export async function executeYieldRotation(
   walletClient: any, // Wagmi wallet client
   onStatusUpdate?: (status: string) => void
 ): Promise<ExecutionResult> {
+  // Create pending transaction record
+  const tx = transactionHistory.addTransaction({
+    walletAddress: plan.fromPosition.address as Address,
+    type: 'yield_rotation',
+    status: 'pending',
+    fromChainId: plan.fromPosition.chainId,
+    fromChainName: plan.fromPosition.chainName,
+    toChainId: plan.toOpportunity.chainId,
+    toChainName: plan.toOpportunity.chainName,
+    fromToken: plan.fromPosition.symbol,
+    fromAmount: plan.fromPosition.balance.toFixed(4),
+    fromAmountUsd: plan.fromPosition.valueUsd,
+    toToken: plan.toOpportunity.token,
+    apyImprovement: plan.apyImprovement,
+    gasCostUsd: plan.gasCostUsd,
+    protocol: plan.toOpportunity.protocol,
+    metadata: {
+      fromApy: plan.fromPosition.currentApy,
+      toApy: plan.toOpportunity.apy,
+      estimatedAnnualGain: plan.estimatedAnnualGain,
+    },
+  });
+
   try {
     onStatusUpdate?.('Preparing transaction...');
     
@@ -363,6 +387,10 @@ export async function executeYieldRotation(
       // Same chain operation - just return success indicator
       // In production, this would deposit into the protocol
       onStatusUpdate?.('Same-chain operation - deposit directly to protocol');
+      transactionHistory.updateTransaction(tx.id, {
+        status: 'completed',
+        error: 'Same-chain deposits require protocol-specific integration',
+      });
       return {
         success: true,
         error: 'Same-chain deposits require protocol-specific integration',
@@ -370,6 +398,7 @@ export async function executeYieldRotation(
     }
     
     onStatusUpdate?.('Requesting wallet signature...');
+    transactionHistory.updateTransaction(tx.id, { status: 'confirming' });
     
     // Execute via LI.FI SDK
     const execution = await lifi.executeRoute(plan.route, {
@@ -398,13 +427,30 @@ export async function executeYieldRotation(
     
     onStatusUpdate?.('Transaction submitted!');
     
+    const txHash = execution.steps?.[0]?.execution?.txHash;
+    
+    // Update transaction as completed
+    transactionHistory.updateTransaction(tx.id, {
+      status: 'completed',
+      txHash,
+      explorerUrl: txHash ? getExplorerUrl(plan.toOpportunity.chainId, txHash) : undefined,
+      profitUsd: plan.estimatedAnnualGain / 12, // Rough monthly estimate
+    });
+    
     return {
       success: true,
-      txHash: execution.steps?.[0]?.execution?.txHash,
+      txHash,
       route: execution,
     };
   } catch (error: any) {
     console.error('Execution error:', error);
+    
+    // Update transaction as failed
+    transactionHistory.updateTransaction(tx.id, {
+      status: 'failed',
+      error: error.message || 'Transaction failed',
+    });
+    
     return {
       success: false,
       error: error.message || 'Transaction failed',
