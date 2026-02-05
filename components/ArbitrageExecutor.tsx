@@ -259,6 +259,15 @@ export const ArbitrageExecutor: React.FC<ArbitrageExecutorProps> = ({ onLog }) =
       if (result.success) {
         setViewMode('success');
         onLog?.(`✅ Arbitrage complete! Profit: $${(result.actualProfit || executionPlan.netProfit).toFixed(2)}`, 'success');
+        
+        // Refresh balance after successful swap
+        setTimeout(() => {
+          window.dispatchEvent(new Event('refresh-balance'));
+          // Refresh available balance
+          if (address) {
+            checkBalance();
+          }
+        }, 2000); // Wait 2 seconds for transaction to be mined
       } else {
         setError(result.error || 'Execution failed');
         setViewMode('error');

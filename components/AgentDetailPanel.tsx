@@ -6,6 +6,8 @@ import LottieAvatar from './LottieAvatar';
 
 interface AgentDetailPanelProps {
   agent: AgentMetadata | null;
+  connectedAddress?: string;
+  isWalletConnected?: boolean;
   onClose: () => void;
   onActivate?: (agentId: string) => void;
   onDeactivate?: (agentId: string) => void;
@@ -16,6 +18,8 @@ interface AgentDetailPanelProps {
 
 const AgentDetailPanel: React.FC<AgentDetailPanelProps> = ({ 
   agent, 
+  connectedAddress,
+  isWalletConnected,
   onClose, 
   onActivate,
   onDeactivate,
@@ -26,11 +30,19 @@ const AgentDetailPanel: React.FC<AgentDetailPanelProps> = ({
   
   if (!agent) return null;
 
-  // Wallet address input for Portfolio Guardian
+  // Wallet address input for Portfolio Guardian - sync with connected wallet
   const [walletAddress, setWalletAddress] = useState(() => {
     return localStorage.getItem('trackedWalletAddress') || '';
   });
   const isPortfolioGuardian = agent.role === 'Archivist';
+
+  // Sync wallet input when user connects wallet - ensures agents use connected address
+  useEffect(() => {
+    if (isWalletConnected && connectedAddress) {
+      setWalletAddress(connectedAddress);
+      localStorage.setItem('trackedWalletAddress', connectedAddress);
+    }
+  }, [isWalletConnected, connectedAddress]);
 
   useEffect(() => {
     if (walletAddress) {

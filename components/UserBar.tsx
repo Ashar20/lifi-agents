@@ -17,7 +17,7 @@ const UserBar: React.FC<UserBarProps> = ({ onLogoClick, onLogout }) => {
   };
 
   return (
-    <div className="bg-black/40 backdrop-blur-sm border-b border-white/10 px-6 py-3">
+    <div className="relative z-[100] bg-black/40 backdrop-blur-sm border-b border-white/10 px-6 py-3">
       <div className="flex items-center justify-between">
         {/* Logo */}
         <button

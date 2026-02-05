@@ -7,9 +7,9 @@ import {
   Zap, 
   TrendingUp, 
   Loader2, 
-  CheckCircle, 
-  AlertCircle, 
+  CheckCircle,
   Wallet,
+  AlertCircle, 
   ArrowRight,
   RefreshCw,
   ExternalLink,
@@ -44,9 +44,25 @@ interface OneClickYieldProps {
 type ViewMode = 'overview' | 'scanning' | 'plan' | 'executing' | 'success' | 'error' | 'auto' | 'history';
 
 export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, connector } = useAccount();
   const { data: walletClient } = useWalletClient();
   const chainId = useChainId();
+  
+  // Detect which wallet is being used
+  const [walletName, setWalletName] = useState<string>('');
+  
+  useEffect(() => {
+    if (isConnected && walletClient && connector) {
+      const detectedName = connector.name || 
+        (typeof window !== 'undefined' && (window as any).ethereum?.isMetaMask ? 'MetaMask' : 
+         'Browser Wallet');
+      setWalletName(detectedName);
+      onLog?.(`🔗 Connected wallet: ${detectedName}`, 'info');
+      
+    } else if (!isConnected) {
+      setWalletName('');
+    }
+  }, [isConnected, walletClient, connector, onLog]);
   
   // State
   const [viewMode, setViewMode] = useState<ViewMode>('overview');
@@ -200,6 +216,15 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
         setTxHash(result.result?.txHash || null);
         setViewMode('success');
         onLog?.('✅ Yield rotation executed successfully!', 'success');
+        
+        // Refresh balance after successful swap
+        setTimeout(() => {
+          window.dispatchEvent(new Event('refresh-balance'));
+          // Also refresh positions by triggering a new scan
+          if (address) {
+            handleScan();
+          }
+        }, 2000); // Wait 2 seconds for transaction to be mined
       } else {
         setError(result.error || 'Execution failed');
         setViewMode('error');
@@ -283,32 +308,43 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
   return (
     <div className="bg-black/40 border border-white/10 rounded-xl overflow-hidden">
       {/* Header */}
-      <div className="p-4 border-b border-white/10 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-            isAutoMode ? 'bg-purple-500/20' : 'bg-neon-green/20'
-          }`}>
-            {isAutoMode ? (
-              <Bot className="text-purple-400 animate-pulse" size={20} />
-            ) : (
-              <Zap className="text-neon-green" size={20} />
-            )}
-          </div>
-          <div>
-            <h3 className="text-white font-bold text-lg">
-              {isAutoMode ? 'Auto-Yield Monitor' : 'One-Click Yield Rotation'}
-            </h3>
-            <p className="text-gray-400 text-sm font-mono">
-              {isTestnet ? '🧪 Testnet' : '🌐 Mainnet'} 
-              {isAutoMode && monitorState && (
-                <span className="ml-2 text-purple-400">
-                  • {monitorState.checksCount} checks • {monitorState.executionsCount} executions
-                </span>
+      <div className="p-4 border-b border-white/10">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+              isAutoMode ? 'bg-purple-500/20' : 'bg-neon-green/20'
+            }`}>
+              {isAutoMode ? (
+                <Bot className="text-purple-400 animate-pulse" size={20} />
+              ) : (
+                <Zap className="text-neon-green" size={20} />
               )}
-            </p>
+            </div>
+            <div>
+              <h3 className="text-white font-bold text-lg">
+                {isAutoMode ? 'Auto-Yield Monitor' : 'One-Click Yield Rotation'}
+              </h3>
+              <p className="text-gray-400 text-sm font-mono">
+                {isTestnet ? '🧪 Testnet' : '🌐 Mainnet'} 
+                {isAutoMode && monitorState && (
+                  <span className="ml-2 text-purple-400">
+                    • {monitorState.checksCount} checks • {monitorState.executionsCount} executions
+                  </span>
+                )}
+              </p>
+            </div>
           </div>
         </div>
-        
+        {walletName && (
+          <div className="flex items-center gap-2 mt-2 text-xs">
+            <Wallet size={12} className="text-gray-500" />
+            <span className="text-gray-500 font-mono">Using: </span>
+            <span className="text-neon-green font-mono font-bold">{walletName}</span>
+          </div>
+        )}
+      </div>
+      
+      <div className="p-4">
         <div className="flex items-center gap-2">
           {/* History button */}
           {monitorState && monitorState.executionHistory.length > 0 && (

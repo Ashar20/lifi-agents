@@ -119,6 +119,7 @@ interface FlowCanvasProps {
   onEdgesChange?: (edges: Array<{source: string, target: string}>) => void;
   agentStatuses?: Record<string, 'idle' | 'negotiating' | 'streaming' | 'offline'>;
   randomDialogues?: Record<string, { dialogue: string; timestamp: number }>;
+  isWalletConnected?: boolean;
 }
 
 const FlowCanvas: React.FC<FlowCanvasProps> = ({ 
@@ -130,7 +131,8 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
   onCloseDialogue,
   persistentEdges = [],
   onEdgesChange: onPersistentEdgesChange,
-  randomDialogues = {}
+  randomDialogues = {},
+  isWalletConnected = false
 }) => {
 
   // Compute initial nodes once
@@ -371,6 +373,9 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
           <div className="text-center">
             <h2 className="text-2xl font-mono text-white/30 font-bold">GRID OFFLINE</h2>
             <p className="text-neon-green/50 text-sm font-mono mt-2">Activate agents to begin cross-chain orchestration</p>
+            {!isWalletConnected && (
+              <p className="text-yellow-500/70 text-xs font-mono mt-3">Connect wallet in top bar for agents to use your address</p>
+            )}
           </div>
         </div>
       )}

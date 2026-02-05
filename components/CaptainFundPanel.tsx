@@ -57,7 +57,7 @@ export const CaptainFundPanel: React.FC<CaptainFundPanelProps> = ({
 
       {/* Dropdown Panel */}
       {showDropdown && (
-        <div className="absolute top-full right-0 mt-1 w-64 bg-black/95 backdrop-blur-xl border border-white/20 rounded-lg shadow-2xl z-50">
+        <div className="absolute top-full right-0 mt-1 w-64 bg-black/95 backdrop-blur-xl border border-white/20 rounded-lg shadow-2xl z-[9999]">
           <div className="p-3">
             {/* Balance Header */}
             <div className="mb-3 pb-2 border-b border-white/10 flex items-center justify-between">

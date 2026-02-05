@@ -37,6 +37,7 @@ export const IntentChat: React.FC<IntentChatProps> = ({
   };
 
   const exampleIntents = [
+    "Do a minimum portfolio rebalance",
     "Use my USDC and always deploy it where yield is higher",
     "Find arbitrage opportunities across all chains",
     "Move my capital to the best yield automatically",

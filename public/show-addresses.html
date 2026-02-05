@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wallet Addresses - LI.FI Agents</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            background: #000;
+            color: #0f0;
+            padding: 40px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #111;
+            border: 1px solid #0f0;
+            border-radius: 8px;
+            padding: 30px;
+        }
+        h1 {
+            color: #0f0;
+            margin-bottom: 20px;
+            text-align: center;
+            border-bottom: 2px solid #0f0;
+            padding-bottom: 10px;
+        }
+        .address-box {
+            background: #000;
+            border: 2px solid #0f0;
+            border-radius: 4px;
+            padding: 20px;
+            margin: 20px 0;
+            word-break: break-all;
+            font-size: 18px;
+            color: #0f0;
+        }
+        .copy-btn {
+            background: #0f0;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+            font-family: inherit;
+        }
+        .copy-btn:hover {
+            background: #0a0;
+        }
+        .copy-btn:active {
+            background: #080;
+        }
+        .info {
+            background: #1a1a1a;
+            border-left: 4px solid #0f0;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .explorer-links {
+            margin-top: 20px;
+        }
+        .explorer-links a {
+            color: #0f0;
+            text-decoration: none;
+            display: block;
+            padding: 5px 0;
+        }
+        .explorer-links a:hover {
+            text-decoration: underline;
+        }
+        .warning {
+            background: #2a1a00;
+            border-left: 4px solid #ff0;
+            padding: 15px;
+            margin: 20px 0;
+            color: #ff0;
+        }
+        .success {
+            color: #0f0;
+            margin-top: 10px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>💰 Wallet Addresses for Adding Funds</h1>
+        
+        <div class="info">
+            <strong>📍 YOUR WALLET ADDRESS</strong>
+            <p style="margin-top: 10px; color: #888;">This address works on ALL EVM chains (Ethereum, Base, Arbitrum, Optimism, Polygon, etc.)</p>
+        </div>
+
+        <div class="address-box" id="addressBox">
+            <div id="address">Loading...</div>
+            <button class="copy-btn" onclick="copyAddress()">📋 Copy Address</button>
+            <div class="success" id="copiedMsg">✅ Copied to clipboard!</div>
+        </div>
+
+        <div class="warning">
+            <strong>⚠️ IMPORTANT:</strong>
+            <ul style="margin-top: 10px; margin-left: 20px;">
+                <li>This is the SAME address on all chains</li>
+                <li>You only need ONE wallet address</li>
+                <li>Switch networks in MetaMask to see balances on different chains</li>
+            </ul>
+        </div>
+
+        <div class="info">
+            <strong>🌐 This address works on:</strong>
+            <ul style="margin-top: 10px; margin-left: 20px;">
+                <li>Ethereum Mainnet</li>
+                <li>Base Mainnet</li>
+                <li>Arbitrum Mainnet</li>
+                <li>Optimism Mainnet</li>
+                <li>Polygon Mainnet</li>
+                <li>Avalanche Mainnet</li>
+            </ul>
+        </div>
+
+        <div class="explorer-links">
+            <strong>📋 Explorer Links:</strong>
+            <div id="explorerLinks"></div>
+        </div>
+
+        <div class="info" style="margin-top: 30px;">
+            <strong>💡 How to Add Funds:</strong>
+            <ol style="margin-top: 10px; margin-left: 20px;">
+                <li>Copy the address above</li>
+                <li>Send funds from an exchange or another wallet</li>
+                <li>Make sure you're on the correct network:
+                    <ul style="margin-top: 5px; margin-left: 20px;">
+                        <li>For Base: Switch to Base network in your wallet</li>
+                        <li>For Arbitrum: Switch to Arbitrum network in your wallet</li>
+                    </ul>
+                </li>
+                <li>Funds will appear in your wallet</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        function getWalletAddress() {
+            // Try localStorage first
+            const stored = localStorage.getItem('trackedWalletAddress');
+            if (stored && stored.startsWith('0x')) {
+                return stored;
+            }
+            
+            // Demo address fallback
+            return '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
+        }
+
+        function displayAddress() {
+            const address = getWalletAddress();
+            document.getElementById('address').textContent = address;
+            
+            // Generate explorer links
+            const explorers = [
+                { name: 'Ethereum', url: `https://etherscan.io/address/${address}` },
+                { name: 'Base', url: `https://basescan.org/address/${address}` },
+                { name: 'Arbitrum', url: `https://arbiscan.io/address/${address}` },
+                { name: 'Optimism', url: `https://optimistic.etherscan.io/address/${address}` },
+                { name: 'Polygon', url: `https://polygonscan.com/address/${address}` },
+            ];
+            
+            const linksHtml = explorers.map(exp => 
+                `<a href="${exp.url}" target="_blank">${exp.name}: ${exp.url}</a>`
+            ).join('');
+            
+            document.getElementById('explorerLinks').innerHTML = linksHtml;
+        }
+
+        function copyAddress() {
+            const address = getWalletAddress();
+            navigator.clipboard.writeText(address).then(() => {
+                const msg = document.getElementById('copiedMsg');
+                msg.style.display = 'block';
+                setTimeout(() => {
+                    msg.style.display = 'none';
+                }, 2000);
+            });
+        }
+
+        // Display on load
+        displayAddress();
+        
+        // Refresh every 2 seconds to catch wallet connections
+        setInterval(displayAddress, 2000);
+    </script>
+</body>
+</html>

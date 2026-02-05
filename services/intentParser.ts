@@ -54,6 +54,7 @@ export const parseIntent = (intent: string): IntentAnalysis => {
   // Rebalancing patterns
   if (
     lowerIntent.includes('rebalance') ||
+    lowerIntent.includes('minimum portfolio') ||
     lowerIntent.includes('allocation') ||
     lowerIntent.includes('balance') ||
     lowerIntent.includes('maintain target')

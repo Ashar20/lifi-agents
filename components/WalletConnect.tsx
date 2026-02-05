@@ -1,7 +1,7 @@
 // Wallet Connection Component
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAccount, useConnect, useDisconnect, useBalance, useChainId, useSwitchChain } from 'wagmi';
-import { Wallet, ChevronDown, LogOut, Copy, Check, ExternalLink } from 'lucide-react';
+import { Wallet, ChevronDown, LogOut, Copy, Check, ExternalLink, RefreshCw } from 'lucide-react';
 import { chainInfo, supportedChains } from '../config/wagmi';
 import { formatUnits } from 'viem';
 
@@ -11,7 +11,7 @@ export const WalletConnect: React.FC = () => {
   const { disconnect } = useDisconnect();
   const chainId = useChainId();
   const { switchChain } = useSwitchChain();
-  const { data: balance } = useBalance({ address });
+  const { data: balance, refetch: refetchBalance, isRefetching: isRefreshingBalance } = useBalance({ address });
   
   const [showDropdown, setShowDropdown] = useState(false);
   const [showChainSelector, setShowChainSelector] = useState(false);
@@ -31,6 +31,30 @@ export const WalletConnect: React.FC = () => {
 
   const currentChain = chainInfo[chainId] || { name: 'Unknown', color: '#888', icon: '?' };
 
+  // Listen for balance refresh events (triggered after swaps)
+  useEffect(() => {
+    const handleRefresh = () => {
+      if (isConnected) {
+        refetchBalance();
+      }
+    };
+
+    // Listen for custom event
+    window.addEventListener('refresh-balance', handleRefresh);
+    
+    // Also refresh periodically (every 10 seconds when connected)
+    const interval = setInterval(() => {
+      if (isConnected) {
+        refetchBalance();
+      }
+    }, 10000);
+
+    return () => {
+      window.removeEventListener('refresh-balance', handleRefresh);
+      clearInterval(interval);
+    };
+  }, [isConnected, refetchBalance]);
+
   // Not connected - show connect buttons
   if (!isConnected) {
     return (
@@ -45,7 +69,7 @@ export const WalletConnect: React.FC = () => {
         </button>
 
         {showDropdown && (
-          <div className="absolute right-0 mt-2 w-64 bg-black border border-neon-green/30 rounded-lg shadow-2xl overflow-hidden" style={{ zIndex: 9999 }}>
+          <div className="absolute right-0 mt-2 w-64 bg-black border border-neon-green/30 rounded-lg shadow-2xl overflow-hidden z-[9999]">
             <div className="p-3 border-b border-white/10 bg-neon-green/5">
               <p className="text-xs text-neon-green font-mono uppercase">Select Wallet</p>
             </div>
@@ -64,9 +88,17 @@ export const WalletConnect: React.FC = () => {
                     <Wallet size={16} className="text-neon-green" />
                   </div>
                   <div>
-                    <p className="text-white font-medium text-sm">{conn.name}</p>
+                    <p className="text-white font-medium text-sm">
+                      {conn.name === 'Injected' && typeof window !== 'undefined' && (window as any).ethereum?.isMetaMask
+                        ? 'MetaMask'
+                        : conn.name}
+                    </p>
                     <p className="text-gray-500 text-xs">
-                      {conn.id === 'injected' ? 'Browser Wallet' : 'Connect'}
+                      {conn.id === 'injected' 
+                        ? (typeof window !== 'undefined' && (window as any).ethereum?.isMetaMask
+                          ? 'MetaMask'
+                          : 'Browser Wallet')
+                        : 'Connect'}
                     </p>
                   </div>
                 </button>
@@ -93,7 +125,7 @@ export const WalletConnect: React.FC = () => {
         </button>
 
         {showChainSelector && (
-          <div className="absolute right-0 mt-2 w-48 bg-black/95 border border-white/20 rounded-lg shadow-xl z-50 overflow-hidden">
+          <div className="absolute right-0 mt-2 w-48 bg-black/95 border border-white/20 rounded-lg shadow-xl z-[9999] overflow-hidden">
             <div className="p-2 border-b border-white/10">
               <p className="text-xs text-gray-400 font-mono uppercase px-2">Switch Chain</p>
             </div>
@@ -135,7 +167,8 @@ export const WalletConnect: React.FC = () => {
           <div className="text-left hidden sm:block">
             <p className="text-white text-sm font-mono">{formatAddress(address!)}</p>
             {balance && (
-              <p className="text-gray-400 text-xs">
+              <p className={`text-gray-400 text-xs flex items-center gap-1 ${isRefreshingBalance ? 'opacity-50' : ''}`}>
+                {isRefreshingBalance && <RefreshCw size={10} className="animate-spin" />}
                 {parseFloat(formatUnits(balance.value, balance.decimals)).toFixed(4)} {balance.symbol}
               </p>
             )}
@@ -144,18 +177,31 @@ export const WalletConnect: React.FC = () => {
         </button>
 
         {showDropdown && (
-          <div className="absolute right-0 mt-2 w-64 bg-black/95 border border-white/20 rounded-lg shadow-xl z-50 overflow-hidden">
+          <div className="absolute right-0 mt-2 w-64 bg-black/95 border border-white/20 rounded-lg shadow-xl z-[9999] overflow-hidden">
             <div className="p-4 border-b border-white/10">
               <p className="text-xs text-gray-400 mb-1">Connected with {connector?.name}</p>
               <p className="text-white font-mono text-sm">{formatAddress(address!)}</p>
               {balance && (
-                <p className="text-neon-green font-mono text-lg mt-1">
+                <p className={`text-neon-green font-mono text-lg mt-1 flex items-center gap-2 ${isRefreshingBalance ? 'opacity-50' : ''}`}>
+                  {isRefreshingBalance && <RefreshCw size={14} className="animate-spin" />}
                   {parseFloat(formatUnits(balance.value, balance.decimals)).toFixed(4)} {balance.symbol}
                 </p>
               )}
             </div>
             
             <div className="p-2">
+              <button
+                onClick={() => {
+                  refetchBalance();
+                }}
+                disabled={isRefreshingBalance}
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white/10 rounded-lg transition-colors text-left disabled:opacity-50"
+                title="Refresh wallet balance"
+              >
+                <RefreshCw size={16} className={`text-gray-400 ${isRefreshingBalance ? 'animate-spin' : ''}`} />
+                <span className="text-white text-sm">{isRefreshingBalance ? 'Refreshing...' : 'Refresh Balance'}</span>
+              </button>
+              
               <button
                 onClick={copyAddress}
                 className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white/10 rounded-lg transition-colors text-left"

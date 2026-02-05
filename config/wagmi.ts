@@ -1,18 +1,20 @@
 // Wagmi Configuration for Multi-Chain Wallet Connection
 import { createConfig, http } from 'wagmi';
 import { mainnet, arbitrum, optimism, polygon, base, avalanche } from 'wagmi/chains';
+import { mantleTestnet } from 'viem/chains';
 import { injected, walletConnect, coinbaseWallet } from 'wagmi/connectors';
 
 // WalletConnect Project ID (optional - for WalletConnect modal)
 const projectId = import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID || '';
 
 // Supported chains for LI.FI cross-chain operations
-export const supportedChains = [mainnet, arbitrum, optimism, polygon, base, avalanche] as const;
+export const supportedChains = [mainnet, arbitrum, optimism, polygon, base, avalanche, mantleTestnet] as const;
 
 // Create wagmi config
 export const wagmiConfig = createConfig({
   chains: supportedChains,
   connectors: [
+    // Generic injected (MetaMask)
     injected({
       shimDisconnect: true,
     }),
@@ -39,6 +41,7 @@ export const wagmiConfig = createConfig({
     [polygon.id]: http('https://polygon-rpc.com'),
     [base.id]: http('https://mainnet.base.org'),
     [avalanche.id]: http('https://api.avax.network/ext/bc/C/rpc'),
+    [mantleTestnet.id]: http('https://rpc.testnet.mantle.xyz'),
   },
 });
 
@@ -50,6 +53,7 @@ export const chainInfo: Record<number, { name: string; color: string; icon: stri
   [polygon.id]: { name: 'Polygon', color: '#8247E5', icon: '🟣' },
   [base.id]: { name: 'Base', color: '#0052FF', icon: '🔵' },
   [avalanche.id]: { name: 'Avalanche', color: '#E84142', icon: '🔺' },
+  [mantleTestnet.id]: { name: 'Mantle Testnet', color: '#00D4FF', icon: '🧪' },
 };
 
 export type SupportedChainId = typeof supportedChains[number]['id'];

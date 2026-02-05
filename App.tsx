@@ -277,10 +277,20 @@ const App: React.FC = () => {
     toast.success(`${agent.name} removed successfully`);
   }, [addLog]);
 
+  // Helper: get wallet address for agents (prefer connected, then localStorage, then demo)
+  const getWalletAddressForAgents = useCallback(() => {
+    if (isConnected && connectedAddress) return connectedAddress;
+    const stored = localStorage.getItem('trackedWalletAddress');
+    if (stored && stored.startsWith('0x')) return stored;
+    return '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'; // Demo fallback
+  }, [isConnected, connectedAddress]);
+
   // Execute agent task (AI-powered)
   const executeAgentTask = useCallback(async (agentId: string, taskDescription?: string) => {
     const agent = AGENTS.find(a => a.id === agentId);
     if (!agent) return;
+
+    const walletAddress = getWalletAddressForAgents();
 
     // Update progress tracking
     setAgentProgress(prev => ({
@@ -374,28 +384,6 @@ const App: React.FC = () => {
         // Portfolio Guardian - Real position tracking
         addLog(agent.name, '🔍 Querying wallet balances across chains...');
         
-        // Get wallet address from localStorage, wagmi connection, or use a default demo address
-        let walletAddress = localStorage.getItem('trackedWalletAddress');
-        
-        // Try to get from wagmi if available
-        if (!walletAddress && typeof window !== 'undefined') {
-          try {
-            // Check if wagmi is available and wallet is connected
-            const wagmiState = (window as any).__WAGMI_STATE__;
-            if (wagmiState?.connections?.size > 0) {
-              const connection = Array.from(wagmiState.connections.values())[0] as any;
-              walletAddress = connection?.accounts?.[0];
-            }
-          } catch {
-            // Wagmi not available, continue with fallback
-          }
-        }
-        
-        // Fallback to demo address if still no address
-        if (!walletAddress) {
-          walletAddress = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'; // Vitalik's address as demo
-        }
-        
         try {
           const { getPortfolioSummary } = await import('./services/portfolioTracker');
           const portfolio = await getPortfolioSummary(walletAddress);
@@ -452,9 +440,6 @@ const App: React.FC = () => {
       } else if (agent.role === 'Oracle') {
         // Rebalancer - Real allocation management
         addLog(agent.name, '⚖️ Analyzing portfolio allocations across chains...');
-        
-        const walletAddress = localStorage.getItem('trackedWalletAddress') || 
-          '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
         
         try {
           const { analyzePortfolioDrift } = await import('./services/rebalancer');
@@ -619,10 +604,6 @@ const App: React.FC = () => {
         try {
           const { prepareExecution, getExecutionSummary } = await import('./services/routeExecutor');
           
-          // Prepare execution for USDC Ethereum -> Arbitrum
-          const walletAddress = localStorage.getItem('trackedWalletAddress') || 
-            '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
-          
           const executionPlan = await prepareExecution({
             fromChain: 1, // Ethereum
             toChain: 42161, // Arbitrum
@@ -716,7 +697,7 @@ const App: React.FC = () => {
       
       toast.error(`Task failed for ${agent.name}`);
     }
-  }, [addLog]);
+  }, [addLog, getWalletAddressForAgents]);
 
   // Handle logout
   const handleLogout = useCallback(() => {
@@ -950,6 +931,7 @@ const App: React.FC = () => {
               agentStatuses={agentStatuses}
               onNodePositionsChange={handleNodePositionsChange}
               randomDialogues={randomDialogues}
+              isWalletConnected={isConnected}
             />
 
             {/* Dialogue Overlay */}
@@ -1122,6 +1104,8 @@ const App: React.FC = () => {
             <div className="h-96 border-t border-white/10 overflow-hidden flex-shrink-0">
               <AgentDetailPanel
                 agent={selectedAgent}
+                connectedAddress={connectedAddress}
+                isWalletConnected={isConnected}
                 onClose={() => setSelectedAgentId(null)}
                 onActivate={handleActivateAgent}
                 onDeactivate={handleDeactivateAgent}
