@@ -1,9 +1,18 @@
 // LI.FI Service Layer for Cross-Chain Operations
 // Integrates LI.FI SDK for route discovery and execution
+// Uses Arc (Circle CCTP) as the liquidity hub for native USDC transfers
 // Docs: https://docs.li.fi/sdk/overview
 
 import { LiFi, Route, Chain, Token, convertQuoteToRoute } from '@lifi/sdk';
 import type { LifiStep, TokenAmount } from '@lifi/types';
+import {
+  canUseArcRoute,
+  getArcTransferInfo,
+  formatArcLog,
+  arcStats,
+  ArcTransferInfo,
+  ARC_SUPPORTED_CHAINS,
+} from './arcIntegration';
 
 // RPC endpoints for balance queries
 const RPC_URLS: Record<number, string> = {
@@ -150,6 +159,13 @@ export interface LifiRouteStatus {
   status: 'PENDING' | 'DONE' | 'FAILED';
   txHash?: string;
   steps?: any[];
+}
+
+// Extended quote result with Arc routing info
+export interface LifiQuoteResult {
+  quote: LifiStep;
+  arcInfo: ArcTransferInfo;
+  isArcRoute: boolean;
 }
 
 export interface WalletTokenBalance {
@@ -331,7 +347,15 @@ export const lifiService = {
   },
 
   // Get quote for cross-chain swap (returns LifiStep - single best route with tx data)
+  // For USDC transfers: ALWAYS prefer Circle CCTP (Arc's underlying protocol)
   async getQuote(params: LifiQuoteParams): Promise<LifiStep | null> {
+    const result = await this.getQuoteWithArcInfo(params);
+    return result?.quote || null;
+  },
+
+  // Get quote with Arc routing information
+  // Returns both the quote and Arc metadata for UI display
+  async getQuoteWithArcInfo(params: LifiQuoteParams): Promise<LifiQuoteResult | null> {
     try {
       console.log('[LI.FI] Requesting quote with params:', {
         fromChain: params.fromChain,
@@ -343,24 +367,115 @@ export const lifiService = {
         toAddress: params.toAddress,
       });
 
-      const quote = await lifi.getQuote({
-        fromChain: params.fromChain,
-        toChain: params.toChain,
-        fromToken: params.fromToken,
-        toToken: params.toToken,
-        fromAmount: params.fromAmount,
-        fromAddress: params.fromAddress,
-        toAddress: params.toAddress,
+      // Check if this route can use Arc (CCTP for native USDC)
+      const canUseArc = canUseArcRoute(
+        params.fromChain,
+        params.toChain,
+        params.fromToken,
+        params.toToken
+      );
+
+      let quote: LifiStep | null = null;
+      let bridgeUsed: string | undefined;
+
+      // For Arc-eligible routes, force Circle CCTP
+      if (canUseArc) {
+        console.log('[LI.FI] ⚡ Arc-eligible route detected - using Circle CCTP for native USDC');
+        console.log(formatArcLog(getArcTransferInfo(
+          params.fromChain,
+          params.toChain,
+          params.fromToken,
+          params.toToken,
+          'circlecctp'
+        )));
+
+        try {
+          // Try Circle CCTP first (Arc's underlying protocol)
+          quote = await lifi.getQuote({
+            fromChain: params.fromChain,
+            toChain: params.toChain,
+            fromToken: params.fromToken,
+            toToken: params.toToken,
+            fromAmount: params.fromAmount,
+            fromAddress: params.fromAddress,
+            toAddress: params.toAddress,
+            // Force Circle CCTP bridge for USDC - this uses Arc's burn/mint mechanism
+            allowBridges: ['circlecctp', 'circle'],
+          });
+
+          if (quote) {
+            bridgeUsed = 'circlecctp';
+            console.log('[LI.FI] ✅ Arc/CCTP quote received - native USDC burn/mint route');
+          }
+        } catch (cctpError) {
+          console.warn('[LI.FI] ⚠️ Arc/CCTP not available for this route, falling back to best route');
+        }
+      }
+
+      // Fallback: use standard LI.FI routing (for non-USDC or if CCTP unavailable)
+      if (!quote) {
+        quote = await lifi.getQuote({
+          fromChain: params.fromChain,
+          toChain: params.toChain,
+          fromToken: params.fromToken,
+          toToken: params.toToken,
+          fromAmount: params.fromAmount,
+          fromAddress: params.fromAddress,
+          toAddress: params.toAddress,
+        });
+
+        // Try to extract bridge used from quote
+        if (quote) {
+          bridgeUsed = (quote as any).toolDetails?.name || (quote as any).tool;
+        }
+      }
+
+      if (!quote) {
+        console.log('[LI.FI] No quote available');
+        return null;
+      }
+
+      // Get Arc transfer info for this route
+      const arcInfo = getArcTransferInfo(
+        params.fromChain,
+        params.toChain,
+        params.fromToken,
+        params.toToken,
+        bridgeUsed
+      );
+
+      console.log('[LI.FI] Quote received:', {
+        isArcRoute: arcInfo.isArcRoute,
+        protocol: arcInfo.protocol,
+        badge: arcInfo.arcBranding.badge,
       });
 
-      console.log('[LI.FI] Quote received:', quote ? 'success' : 'null');
-      return quote;
+      return {
+        quote,
+        arcInfo,
+        isArcRoute: arcInfo.isArcRoute,
+      };
     } catch (error: any) {
       console.error('[LI.FI] Error getting quote:', error);
       console.error('[LI.FI] Error details:', error?.message, error?.response?.data || error?.cause);
       // Re-throw with more context so callers can see what went wrong
       throw new Error(`LI.FI quote failed: ${error?.message || 'Unknown error'}`);
     }
+  },
+
+  // Record Arc transfer for stats tracking
+  recordArcTransfer(fromChain: string, toChain: string, amountUsd: number): void {
+    arcStats.recordTransfer(fromChain, toChain, amountUsd);
+  },
+
+  // Get Arc stats
+  getArcStats() {
+    return arcStats.getStats();
+  },
+
+  // Get Arc supported chains
+  getArcSupportedChains() {
+    return ARC_SUPPORTED_CHAINS;
   },
 
   // Execute a cross-chain route
@@ -464,11 +579,14 @@ export const lifiService = {
 // Make service available globally for debugging
 if (typeof window !== 'undefined') {
   (window as any).lifiService = lifiService;
-  console.log('%c🌐 LI.FI SERVICE', 'color: #00d4ff; font-weight: bold; font-size: 14px;');
+  console.log('%c🌐 LI.FI + ⚡ ARC', 'background: linear-gradient(90deg, #00d4ff, #0066FF); color: white; font-weight: bold; font-size: 14px; padding: 4px 8px; border-radius: 4px;');
+  console.log('%cCross-chain infrastructure powered by Arc Liquidity Hub', 'color: #0066FF; font-style: italic;');
   console.log('%cUse these commands in console:', 'color: #00d4ff;');
   console.log('  lifiService.getChains() - Get available chains');
   console.log('  lifiService.getTokens(chainId) - Get tokens for a chain');
   console.log('  lifiService.getQuote(params) - Get cross-chain quote');
+  console.log('  lifiService.getQuoteWithArcInfo(params) - Get quote with Arc routing info');
   console.log('  lifiService.getUSDCBalances(walletAddress) - Get USDC across all chains');
-  console.log('  lifiService.getTokenBalance(wallet, chainId, tokenAddr) - Get specific token balance');
+  console.log('  lifiService.getArcStats() - Get Arc transfer statistics');
+  console.log('  lifiService.getArcSupportedChains() - Get Arc/CCTP supported chains');
 }
