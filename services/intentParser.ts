@@ -1,7 +1,7 @@
 // Intent Parser - Analyzes user intents and determines agent connections
 
 export interface IntentAnalysis {
-  intentType: 'yield_optimization' | 'arbitrage' | 'rebalancing' | 'monitoring' | 'general';
+  intentType: 'yield_optimization' | 'arbitrage' | 'rebalancing' | 'monitoring' | 'portfolio_check' | 'execute' | 'swap' | 'general';
   requiredAgents: string[]; // Agent IDs
   connections: Array<{ source: string; target: string }>;
   description: string;
@@ -10,13 +10,18 @@ export interface IntentAnalysis {
 export const parseIntent = (intent: string): IntentAnalysis => {
   const lowerIntent = intent.toLowerCase();
   
-  // Yield optimization patterns
+  // Yield optimization patterns - including "best use of X USDC from my wallet"
   if (
     lowerIntent.includes('yield') ||
     lowerIntent.includes('apy') ||
-    lowerIntent.includes('deploy') && (lowerIntent.includes('higher') || lowerIntent.includes('better')) ||
-    lowerIntent.includes('best yield') ||
-    lowerIntent.includes('optimize yield')
+    lowerIntent.includes('best use') ||
+    (lowerIntent.includes('put my') && (lowerIntent.includes('usdc') || lowerIntent.includes('usdt') || lowerIntent.includes('capital'))) ||
+    lowerIntent.includes('earns the most') ||
+    lowerIntent.includes('where it earns') ||
+    (lowerIntent.includes('deploy') && (lowerIntent.includes('higher') || lowerIntent.includes('better') || lowerIntent.includes('highest'))) ||
+    lowerIntent.includes('optimize yield') ||
+    (lowerIntent.includes('use my') && (lowerIntent.includes('wallet') || lowerIntent.includes('usdc') || lowerIntent.includes('funds'))) ||
+    (lowerIntent.includes('best') && (lowerIntent.includes('yield') || lowerIntent.includes('usdc')))
   ) {
     return {
       intentType: 'yield_optimization',
@@ -27,7 +32,7 @@ export const parseIntent = (intent: string): IntentAnalysis => {
         { source: 'a4', target: 'a6' }, // Risk Sentinel → Route Executor
         { source: 'a0', target: 'a6' }  // Strategist → Route Executor (direct approval)
       ],
-      description: 'Setting up cross-chain yield optimization workflow. Agents will monitor yields across chains and automatically move capital to highest APY opportunities.'
+      description: "Got it! I'll find the best place to put your funds so they earn more. Checking yields across chains now."
     };
   }
   
@@ -36,18 +41,19 @@ export const parseIntent = (intent: string): IntentAnalysis => {
     lowerIntent.includes('arbitrage') ||
     lowerIntent.includes('price difference') ||
     lowerIntent.includes('profitable trade') ||
-    lowerIntent.includes('price gap')
+    lowerIntent.includes('price gap') ||
+    lowerIntent.includes('find me arbitrage')
   ) {
     return {
       intentType: 'arbitrage',
-      requiredAgents: ['a0', 'a1', 'a4', 'a6'], // Route Strategist, Arbitrage Hunter, Risk Sentinel, Route Executor
+      requiredAgents: ['a0', 'a1', 'a4', 'a6'],
       connections: [
-        { source: 'a0', target: 'a1' }, // Strategist → Arbitrage Hunter
-        { source: 'a1', target: 'a4' }, // Arbitrage Hunter → Risk Sentinel
-        { source: 'a4', target: 'a6' }, // Risk Sentinel → Route Executor
-        { source: 'a0', target: 'a6' }  // Strategist → Route Executor
+        { source: 'a0', target: 'a1' },
+        { source: 'a1', target: 'a4' },
+        { source: 'a4', target: 'a6' },
+        { source: 'a0', target: 'a6' }
       ],
-      description: 'Configuring arbitrage detection system. Agents will scan for price differences across chains and execute profitable trades automatically.'
+      description: "On it! Scanning for price gaps across chains - I'll let you know when I find something worth trading."
     };
   }
   
@@ -56,19 +62,81 @@ export const parseIntent = (intent: string): IntentAnalysis => {
     lowerIntent.includes('rebalance') ||
     lowerIntent.includes('minimum portfolio') ||
     lowerIntent.includes('allocation') ||
-    lowerIntent.includes('balance') ||
-    lowerIntent.includes('maintain target')
+    lowerIntent.includes('balance') && lowerIntent.includes('portfolio') ||
+    lowerIntent.includes('maintain target') ||
+    lowerIntent.includes('match my targets')
   ) {
     return {
       intentType: 'rebalancing',
-      requiredAgents: ['a0', 'a2', 'a5', 'a6'], // Route Strategist, Portfolio Guardian, Rebalancer, Route Executor
+      requiredAgents: ['a0', 'a2', 'a5', 'a6'],
       connections: [
-        { source: 'a0', target: 'a2' }, // Strategist → Portfolio Guardian
-        { source: 'a2', target: 'a5' }, // Portfolio Guardian → Rebalancer
-        { source: 'a5', target: 'a6' }, // Rebalancer → Route Executor
-        { source: 'a0', target: 'a6' }  // Strategist → Route Executor
+        { source: 'a0', target: 'a2' },
+        { source: 'a2', target: 'a5' },
+        { source: 'a5', target: 'a6' },
+        { source: 'a0', target: 'a6' }
       ],
-      description: 'Initializing portfolio rebalancing workflow. Agents will monitor allocations and automatically rebalance across chains to maintain target ratios.'
+      description: "Checking your allocations now. I'll rebalance things to match your targets across chains."
+    };
+  }
+  
+  // Portfolio check - balance queries, fund checks, wallet status
+  // This should match BEFORE yield optimization to avoid false positives
+  if (
+    // Direct balance questions
+    lowerIntent.includes('how much') && (lowerIntent.includes('fund') || lowerIntent.includes('usdc') || lowerIntent.includes('balance') || lowerIntent.includes('have') || lowerIntent.includes('wallet') || lowerIntent.includes('money') || lowerIntent.includes('token')) ||
+    // What do I have patterns
+    lowerIntent.includes('what') && (lowerIntent.includes('do i have') || lowerIntent.includes('funds') || lowerIntent.includes('balance')) ||
+    // Check patterns
+    lowerIntent.includes('check') && (lowerIntent.includes('fund') || lowerIntent.includes('wallet') || lowerIntent.includes('balance') || lowerIntent.includes('portfolio')) ||
+    // Show patterns
+    lowerIntent.includes('show') && (lowerIntent.includes('wallet') || lowerIntent.includes('portfolio') || lowerIntent.includes('fund') || lowerIntent.includes('balance')) ||
+    // My balance/funds patterns
+    lowerIntent.includes('my balance') || lowerIntent.includes('my funds') || lowerIntent.includes('my wallet') ||
+    // Direct questions
+    lowerIntent.includes('funds i have') || lowerIntent.includes('in my wallet') ||
+    lowerIntent.includes('wallet balance') || lowerIntent.includes('total balance') ||
+    // USDC specific without action words
+    (lowerIntent.includes('usdc') && !lowerIntent.includes('use') && !lowerIntent.includes('swap') && !lowerIntent.includes('send') && !lowerIntent.includes('best') && !lowerIntent.includes('yield') && !lowerIntent.includes('deploy'))
+  ) {
+    return {
+      intentType: 'portfolio_check',
+      requiredAgents: ['a2'], // Portfolio Guardian only
+      connections: [],
+      description: "Checking your wallet now."
+    };
+  }
+  
+  // Swap / Bridge / Transfer patterns - IMMEDIATE EXECUTION
+  if (
+    lowerIntent.includes('swap') ||
+    lowerIntent.includes('bridge') ||
+    lowerIntent.includes('transfer') && (lowerIntent.includes('to') || lowerIntent.includes('from')) ||
+    lowerIntent.includes('send') && (lowerIntent.includes('usdc') || lowerIntent.includes('eth') || lowerIntent.includes('token')) ||
+    lowerIntent.includes('move') && (lowerIntent.includes('usdc') || lowerIntent.includes('chain') || lowerIntent.includes('arbitrum') || lowerIntent.includes('optimism') || lowerIntent.includes('polygon') || lowerIntent.includes('base'))
+  ) {
+    return {
+      intentType: 'swap',
+      requiredAgents: ['a0', 'a4', 'a6'], // Route Strategist, Risk Sentinel, Route Executor
+      connections: [
+        { source: 'a0', target: 'a4' },
+        { source: 'a4', target: 'a6' },
+        { source: 'a0', target: 'a6' }
+      ],
+      description: "Got it! Preparing your cross-chain swap now. I'll execute it as soon as the route is ready."
+    };
+  }
+
+  // Execute / run it / go ahead
+  if (
+    lowerIntent === 'execute it' || lowerIntent === 'run it' || lowerIntent === 'go' ||
+    lowerIntent.includes('execute') && lowerIntent.length < 20 ||
+    lowerIntent.includes('go ahead') || lowerIntent.includes('do it')
+  ) {
+    return {
+      intentType: 'execute',
+      requiredAgents: ['a0', 'a6'], // Route Strategist + Route Executor
+      connections: [{ source: 'a0', target: 'a6' }],
+      description: "Running it now."
     };
   }
   
@@ -81,30 +149,30 @@ export const parseIntent = (intent: string): IntentAnalysis => {
   ) {
     return {
       intentType: 'monitoring',
-      requiredAgents: ['a0', 'a1', 'a2'], // Route Strategist, Arbitrage Hunter, Portfolio Guardian
+      requiredAgents: ['a0', 'a1', 'a2'],
       connections: [
-        { source: 'a0', target: 'a1' }, // Strategist → Arbitrage Hunter
-        { source: 'a0', target: 'a2' }  // Strategist → Portfolio Guardian
+        { source: 'a0', target: 'a1' },
+        { source: 'a0', target: 'a2' }
       ],
-      description: 'Setting up monitoring system. Agents will track positions, prices, and opportunities across all chains.'
+      description: "Got you covered. I'll keep an eye on your positions and prices across all chains."
     };
   }
   
   // General/catch-all - full workflow
   return {
     intentType: 'general',
-    requiredAgents: ['a0', 'a1', 'a2', 'a3', 'a4', 'a5', 'a6'], // All agents
+    requiredAgents: ['a0', 'a1', 'a2', 'a3', 'a4', 'a5', 'a6'],
     connections: [
-      { source: 'a0', target: 'a1' }, // Strategist → Arbitrage Hunter
-      { source: 'a0', target: 'a2' }, // Strategist → Portfolio Guardian
-      { source: 'a0', target: 'a3' }, // Strategist → Yield Seeker
-      { source: 'a1', target: 'a4' }, // Arbitrage Hunter → Risk Sentinel
-      { source: 'a3', target: 'a4' }, // Yield Seeker → Risk Sentinel
-      { source: 'a2', target: 'a5' }, // Portfolio Guardian → Rebalancer
-      { source: 'a4', target: 'a6' }, // Risk Sentinel → Route Executor
-      { source: 'a5', target: 'a6' }, // Rebalancer → Route Executor
-      { source: 'a0', target: 'a6' }  // Strategist → Route Executor
+      { source: 'a0', target: 'a1' },
+      { source: 'a0', target: 'a2' },
+      { source: 'a0', target: 'a3' },
+      { source: 'a1', target: 'a4' },
+      { source: 'a3', target: 'a4' },
+      { source: 'a2', target: 'a5' },
+      { source: 'a4', target: 'a6' },
+      { source: 'a5', target: 'a6' },
+      { source: 'a0', target: 'a6' }
     ],
-    description: 'Activating full cross-chain orchestration system. All agents will work together to optimize your capital across all EVM chains.'
+    description: "Alright, I'm on it! Bringing everyone online to optimize your capital across chains. Give me a sec."
   };
 };

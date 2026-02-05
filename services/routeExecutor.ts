@@ -97,16 +97,33 @@ export async function prepareExecution(
   
   try {
     // Get quote from LI.FI
-    const quote = await lifiService.getQuote({
-      fromChain: params.fromChain,
-      toChain: params.toChain,
-      fromToken: params.fromToken,
-      toToken: params.toToken,
-      fromAmount: params.fromAmount,
-      fromAddress: params.fromAddress,
-      toAddress: params.toAddress || params.fromAddress,
-    });
-    
+    let quote;
+    try {
+      quote = await lifiService.getQuote({
+        fromChain: params.fromChain,
+        toChain: params.toChain,
+        fromToken: params.fromToken,
+        toToken: params.toToken,
+        fromAmount: params.fromAmount,
+        fromAddress: params.fromAddress,
+        toAddress: params.toAddress || params.fromAddress,
+      });
+    } catch (quoteError: any) {
+      console.error('Quote request failed:', quoteError);
+      return {
+        quote: null,
+        riskAnalysis: null,
+        estimatedOutput: '0',
+        estimatedOutputUSD: 0,
+        gasCostUSD: 0,
+        totalCostUSD: 0,
+        netValueUSD: 0,
+        steps: [],
+        readyToExecute: false,
+        warnings: [quoteError?.message || 'Failed to get quote from LI.FI'],
+      };
+    }
+
     if (!quote) {
       return {
         quote: null,

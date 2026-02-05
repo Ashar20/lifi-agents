@@ -434,9 +434,8 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
                 value={maxGasCost}
                 onChange={(e) => setMaxGasCost(Number(e.target.value))}
                 className="w-full bg-black/30 border border-white/20 rounded px-3 py-2 text-white text-sm"
-                min="1"
-                max="500"
-                step="5"
+                min="0"
+                step="1"
               />
             </div>
             <div>
@@ -448,9 +447,8 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
                 value={minPositionValue}
                 onChange={(e) => setMinPositionValue(Number(e.target.value))}
                 className="w-full bg-black/30 border border-white/20 rounded px-3 py-2 text-white text-sm"
-                min="10"
-                max="10000"
-                step="10"
+                min="0"
+                step="1"
               />
             </div>
             <div>

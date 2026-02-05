@@ -274,6 +274,59 @@ Generate a brief, professional status update (1-2 sentences max) about cross-cha
       console.warn('Dialogue generation error:', error);
       return `${agentName}: Ready and monitoring.`;
     }
+  },
+
+  /**
+   * Generate dynamic, contextual responses for intent chat.
+   * Avoids robotic predefined phrases - responds naturally to what the user actually said.
+   */
+  async generateIntentResponses(
+    userIntent: string,
+    intentType: string,
+    agentNames: string[]
+  ): Promise<{ systemMessage: string; agentMessages: Record<string, string> }> {
+    const fallback: { systemMessage: string; agentMessages: Record<string, string> } = {
+      systemMessage: "Got it! We're on it.",
+      agentMessages: {}
+    };
+
+    if (!ai || !GEMINI_API_KEY || !rateLimiter.canMakeCall('gemini')) {
+      return fallback;
+    }
+
+    const agentList = agentNames.join(', ');
+    const prompt = `You're writing responses for a DeFi agent chat. The user just said: "${userIntent}"
+
+Intent type: ${intentType}
+Agents responding: ${agentList}
+
+Generate natural, human responses - NOT robotic or scripted. Match the user's tone and wording. Be brief (1 short sentence each).
+
+Respond with ONLY valid JSON in this exact format, no other text:
+{"systemMessage":"one short sentence acknowledging what they asked","agentMessages":{"Agent Name":"their brief reply","Agent Name 2":"their brief reply"}}
+
+Each agent message should feel like a real person responding to THIS specific request - not a generic status update. Vary the phrasing.`;
+
+    try {
+      rateLimiter.recordCall('gemini');
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+      });
+      const text = (response.text || '').trim();
+      // Strip markdown code blocks if present
+      const jsonStr = text.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim();
+      const parsed = JSON.parse(jsonStr);
+      if (parsed.systemMessage && typeof parsed.agentMessages === 'object') {
+        return {
+          systemMessage: String(parsed.systemMessage).slice(0, 200),
+          agentMessages: parsed.agentMessages
+        };
+      }
+    } catch (e) {
+      console.warn('generateIntentResponses parse error:', e);
+    }
+    return fallback;
   }
 };
 

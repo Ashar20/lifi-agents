@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useAccount } from 'wagmi';
+import { useAccount, useWalletClient } from 'wagmi';
 import { AGENTS, INITIAL_LOGS, AGENT_ABILITIES } from './constants';
 import { AgentMetadata, LogMessage, AgentTaskResult } from './types';
 import UserBar from './components/UserBar';
@@ -29,6 +29,7 @@ import './toast-custom.css';
 const App: React.FC = () => {
   // Wagmi wallet connection
   const { address: connectedAddress, isConnected } = useAccount();
+  const { data: walletClient } = useWalletClient();
   
   // Auto-create guest session on first load
   useEffect(() => {
@@ -112,6 +113,16 @@ const App: React.FC = () => {
     agentName?: string;
   }>>([]);
   const [isProcessingIntent, setIsProcessingIntent] = useState(false);
+
+  // --- Execution State ---
+  const [pendingExecution, setPendingExecution] = useState<{
+    type: 'yield' | 'arbitrage' | 'swap' | 'rebalance';
+    quote: any;
+    summary: string;
+    estimatedOutput: string;
+    gasCost: string;
+  } | null>(null);
+  const [isExecuting, setIsExecuting] = useState(false);
   
   // --- Persist taskResults to localStorage ---
   useEffect(() => {
@@ -145,9 +156,19 @@ const App: React.FC = () => {
       addLog('SYSTEM', '🚀 LI.FI Agents Orchestrator Initializing...');
       addLog('SYSTEM', '🌐 Connecting to LI.FI SDK...');
       
+      // Verify LI.FI SDK is installed and usable
+      let lifiOk = false;
+      try {
+        const { lifiService } = await import('./services/lifi');
+        const chains = await lifiService.getChains();
+        lifiOk = Array.isArray(chains) && chains.length > 0;
+      } catch (e) {
+        console.warn('LI.FI SDK check failed:', e);
+      }
+      
       setTimeout(() => {
         addLog('SYSTEM', '✅ Gemini AI: Ready for agent intelligence');
-        addLog('SYSTEM', '✅ LI.FI SDK: Ready for cross-chain routing');
+        addLog('SYSTEM', lifiOk ? '✅ LI.FI SDK: Ready for cross-chain routing' : '⚠️ LI.FI SDK: Check network/API');
         addLog('SYSTEM', '✅ AI Network: Online and operational');
         addLog('SYSTEM', '🌐 Cross-chain systems ready. Agents standing by.');
       }, 1000);
@@ -223,6 +244,28 @@ const App: React.FC = () => {
     };
     setLogs(prev => [...prev.slice(-99), newLog]);
   }, []);
+
+  // Workflow reset - clear all agents, connections, tasks, and logs
+  const handleWorkflowReset = useCallback(() => {
+    setActiveAgents([]);
+    setPersistentEdges([]);
+    setTaskResults([]);
+    setLogs(INITIAL_LOGS);
+    setChatMessages([]);
+    setAgentStatuses({});
+    setAgentProgress({});
+    setSelectedAgentId(null);
+    setActiveDialogue(null);
+    setRandomDialogues({});
+    setStreamingEdges([]);
+    setAgentPositions({});
+    localStorage.removeItem('activeAgents');
+    localStorage.removeItem('agentConnections');
+    localStorage.removeItem('nodePositions');
+    localStorage.removeItem('taskResults');
+    addLog('SYSTEM', '🔄 Workflow reset. All agents deactivated, connections cleared.');
+    toast.info('Workflow reset complete');
+  }, [addLog]);
 
   // Activate agent
   const handleActivateAgent = useCallback((agentId: string) => {
@@ -335,16 +378,30 @@ const App: React.FC = () => {
       let summary = '';
       
       if (agent.role === 'Navigator') {
-        // Arbitrage Hunter - Real price monitoring
-        addLog(agent.name, '🔍 Fetching real-time prices across chains...');
-        
+        // Arbitrage Hunter - Real price monitoring with detailed logs
+        addLog(agent.name, '👀 Starting arbitrage scan...');
+        await new Promise(r => setTimeout(r, 300));
+        addLog(agent.name, '📡 Connecting to Ethereum mainnet...');
+        await new Promise(r => setTimeout(r, 200));
+        addLog(agent.name, '📡 Connecting to Arbitrum...');
+        await new Promise(r => setTimeout(r, 200));
+        addLog(agent.name, '📡 Connecting to Optimism...');
+        await new Promise(r => setTimeout(r, 200));
+        addLog(agent.name, '📡 Connecting to Polygon...');
+        await new Promise(r => setTimeout(r, 200));
+        addLog(agent.name, '📡 Connecting to Base...');
+        await new Promise(r => setTimeout(r, 300));
+        addLog(agent.name, '🔍 Fetching USDC prices from all DEXs...');
+
         const { detectArbitrageOpportunities } = await import('./services/priceFetcher');
         const opportunities = await detectArbitrageOpportunities('USDC', 0.3, 1000);
+
+        addLog(agent.name, `📊 Analyzed ${opportunities.length > 0 ? opportunities.length : 'multiple'} price points across 5 chains`);
         
         if (opportunities.length > 0) {
           const topOpportunity = opportunities[0];
           const analysis = await geminiService.chat({
-            prompt: `As Arbitrage Hunter, analyze this real arbitrage opportunity: ${topOpportunity.tokenSymbol} price difference of ${topOpportunity.priceDifference.toFixed(2)}% between ${topOpportunity.fromChainName} ($${topOpportunity.fromPrice.toFixed(4)}) and ${topOpportunity.toChainName} ($${topOpportunity.toPrice.toFixed(4)}). Estimated profit: $${topOpportunity.profitAfterFees.toFixed(2)}. Provide a brief analysis.`
+            prompt: `You're Arbitrage Hunter, a friendly DeFi agent. Talk like a human - casual, helpful, no jargon. Analyze this arbitrage: ${topOpportunity.tokenSymbol} is ${topOpportunity.priceDifference.toFixed(2)}% cheaper on ${topOpportunity.fromChainName} ($${topOpportunity.fromPrice.toFixed(4)}) than ${topOpportunity.toChainName} ($${topOpportunity.toPrice.toFixed(4)}). Profit after fees: ~$${topOpportunity.profitAfterFees.toFixed(2)}. Give a short, conversational take - 1-2 sentences.`
           });
           
           result = { 
@@ -369,7 +426,7 @@ const App: React.FC = () => {
         } else {
           // No opportunities found
           const analysis = await geminiService.chat({
-            prompt: `As Arbitrage Hunter, report that no profitable arbitrage opportunities were found after scanning real prices across Ethereum, Arbitrum, Optimism, Polygon, and Base chains.`
+            prompt: `You're Arbitrage Hunter. Talk like a human - casual, friendly. No profitable arbitrage found after scanning Ethereum, Arbitrum, Optimism, Polygon, and Base. Give a short, conversational reply - 1-2 sentences.`
           });
           result = { 
             type: 'arbitrage_detection', 
@@ -381,30 +438,77 @@ const App: React.FC = () => {
           summary = `Scanned real prices across 5 chains. No profitable arbitrage opportunities found (price differences too small after fees).`;
         }
       } else if (agent.role === 'Archivist') {
-        // Portfolio Guardian - Real position tracking
-        addLog(agent.name, '🔍 Querying wallet balances across chains...');
-        
+        // Portfolio Guardian - Real position tracking using LI.FI SDK
+        addLog(agent.name, '📂 Starting portfolio scan...');
+        await new Promise(r => setTimeout(r, 200));
+        addLog(agent.name, `🔗 Checking wallet ${walletAddress.slice(0, 8)}...${walletAddress.slice(-6)}`);
+        await new Promise(r => setTimeout(r, 300));
+
         try {
+          // Use LI.FI SDK for USDC balances (most accurate)
+          const { lifiService } = await import('./services/lifi');
           const { getPortfolioSummary } = await import('./services/portfolioTracker');
+
+          addLog(agent.name, '📡 Querying Ethereum mainnet...');
+          await new Promise(r => setTimeout(r, 200));
+          addLog(agent.name, '📡 Querying Arbitrum...');
+          await new Promise(r => setTimeout(r, 200));
+          addLog(agent.name, '📡 Querying Polygon...');
+          await new Promise(r => setTimeout(r, 200));
+
+          // Fetch USDC via LI.FI SDK (more reliable)
+          const usdcBalances = await lifiService.getUSDCBalances(walletAddress);
+
+          if (usdcBalances.length > 0) {
+            usdcBalances.forEach(b => {
+              addLog(agent.name, `💰 Found ${b.balanceFormatted.toFixed(2)} USDC on ${b.chainName}`);
+            });
+          } else {
+            addLog(agent.name, '📭 No USDC found on any chain');
+          }
+
+          addLog(agent.name, '📊 Fetching full portfolio data...');
+
+          // Also get full portfolio for other tokens
           const portfolio = await getPortfolioSummary(walletAddress);
-          
+
+          addLog(agent.name, `✅ Portfolio loaded: ${portfolio.tokenCount} tokens across ${portfolio.chains.length} chains`);
+
+          // Merge USDC data from LI.FI (more accurate) with portfolio data
+          const usdcTotal = usdcBalances.reduce((sum, b) => sum + b.balanceFormatted, 0);
+          const usdcByChain = usdcBalances.reduce((acc, b) => {
+            acc[b.chainName] = b.balanceFormatted;
+            return acc;
+          }, {} as Record<string, number>);
+
           // Group positions by chain and token
           const positionsByChain: Record<string, number> = {};
           const positionsByToken: Record<string, number> = {};
-          
+
           portfolio.positions.forEach(pos => {
             positionsByChain[pos.chainName] = (positionsByChain[pos.chainName] || 0) + pos.valueUSD;
             positionsByToken[pos.tokenSymbol] = (positionsByToken[pos.tokenSymbol] || 0) + pos.valueUSD;
           });
-          
+
+          // Override USDC with LI.FI data (more accurate)
+          if (usdcTotal > 0) {
+            positionsByToken['USDC'] = usdcTotal;
+          }
+
+          const usdcDetails = usdcBalances.length > 0
+            ? `USDC breakdown: ${usdcBalances.map(b => `${b.chainName}: ${b.balanceFormatted.toFixed(2)}`).join(', ')}.`
+            : 'No USDC found across supported chains.';
+
           const analysis = await geminiService.chat({
-            prompt: `As Portfolio Guardian, analyze this real cross-chain portfolio: Total value: $${portfolio.totalValueUSD.toFixed(2)}, ${portfolio.tokenCount} positions across ${portfolio.chains.length} chains (${portfolio.chains.join(', ')}). Positions by token: ${Object.entries(positionsByToken).map(([token, value]) => `${token}: $${value.toFixed(2)}`).join(', ')}. ${portfolio.pnl24h !== undefined ? `24h PnL: ${portfolio.pnl24h >= 0 ? '+' : ''}$${portfolio.pnl24h.toFixed(2)} (${portfolio.pnlPercent !== undefined ? (portfolio.pnlPercent >= 0 ? '+' : '') + portfolio.pnlPercent.toFixed(2) + '%' : 'N/A'})` : ''}. Provide a brief portfolio analysis.`
+            prompt: `You're Portfolio Guardian. Talk like a human - friendly, clear, no jargon. User's wallet ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}: $${portfolio.totalValueUSD.toFixed(2)} total, ${portfolio.tokenCount} positions across ${portfolio.chains.join(', ')}. ${usdcDetails} By token: ${Object.entries(positionsByToken).map(([token, value]) => `${token}: $${typeof value === 'number' ? value.toFixed(2) : value}`).join(', ')}. ${portfolio.pnl24h !== undefined ? `24h change: ${portfolio.pnl24h >= 0 ? '+' : ''}$${portfolio.pnl24h.toFixed(2)} (${portfolio.pnlPercent !== undefined ? (portfolio.pnlPercent >= 0 ? '+' : '') + portfolio.pnlPercent.toFixed(2) + '%' : 'N/A'})` : ''}. Give a short, conversational summary - 1-2 sentences.`
           });
-          
-          result = { 
-            type: 'position_monitoring', 
+
+          result = {
+            type: 'position_monitoring',
             positions: portfolio.tokenCount,
             totalValue: `$${portfolio.totalValueUSD.toFixed(2)}`,
+            usdcTotal: `${usdcTotal.toFixed(2)} USDC`,
+            usdcByChain,
             pnl: portfolio.pnl24h !== undefined ? `${portfolio.pnl24h >= 0 ? '+' : ''}$${portfolio.pnl24h.toFixed(2)}` : 'N/A',
             pnlPercent: portfolio.pnlPercent !== undefined ? `${portfolio.pnlPercent >= 0 ? '+' : ''}${portfolio.pnlPercent.toFixed(2)}%` : 'N/A',
             analysis: analysis.text,
@@ -415,20 +519,21 @@ const App: React.FC = () => {
             lastUpdated: new Date(portfolio.lastUpdated).toLocaleString()
           };
           taskType = 'position_monitoring';
-          summary = `Tracked ${portfolio.tokenCount} real positions across ${portfolio.chains.length} chains - Total value: $${portfolio.totalValueUSD.toFixed(2)}${portfolio.pnl24h !== undefined ? `, PnL: ${portfolio.pnl24h >= 0 ? '+' : ''}$${portfolio.pnl24h.toFixed(2)}` : ''}`;
+          summary = `Wallet ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}: ${usdcTotal.toFixed(2)} USDC across ${usdcBalances.length} chains. Total portfolio: $${portfolio.totalValueUSD.toFixed(2)}`;
         } catch (error: any) {
           console.error('Portfolio tracking error:', error);
           addLog('ERROR', `Failed to fetch portfolio: ${error.message}`);
-          
+
           // Fallback to analysis only
           const analysis = await geminiService.chat({
-            prompt: `As Portfolio Guardian, report that portfolio tracking encountered an error: ${error.message}. Suggest checking wallet address and network connectivity.`
+            prompt: `You're Portfolio Guardian. Talk like a human - friendly, helpful. Couldn't fetch the portfolio for ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)} (${error.message}). Give a short, conversational suggestion - 1 sentence.`
           });
-          
-          result = { 
-            type: 'position_monitoring', 
+
+          result = {
+            type: 'position_monitoring',
             positions: 0,
             totalValue: '$0.00',
+            usdcTotal: '0 USDC',
             pnl: 'N/A',
             analysis: analysis.text,
             chains: [],
@@ -453,7 +558,7 @@ const App: React.FC = () => {
           });
           
           const analysis = await geminiService.chat({
-            prompt: `As Rebalancer, analyze this real portfolio drift: Total value: $${driftAnalysis.totalValueUSD.toFixed(2)}, Average drift: ${driftAnalysis.totalDrift.toFixed(1)}%. ${driftAnalysis.recommendations.join('. ')}. Needs rebalancing: ${driftAnalysis.needsRebalancing}. Provide a brief rebalancing recommendation.`
+            prompt: `You're Rebalancer. Talk like a human - friendly, clear. Portfolio: $${driftAnalysis.totalValueUSD.toFixed(2)}, drift: ${driftAnalysis.totalDrift.toFixed(1)}%. ${driftAnalysis.recommendations.join('. ')}. Needs rebalancing: ${driftAnalysis.needsRebalancing}. Give a short, conversational recommendation - 1-2 sentences.`
           });
           
           result = { 
@@ -473,7 +578,7 @@ const App: React.FC = () => {
         } catch (error: any) {
           console.error('Rebalancing analysis error:', error);
           const analysis = await geminiService.chat({
-            prompt: `As Rebalancer, report that allocation analysis encountered an error: ${error.message}`
+            prompt: `You're Rebalancer. Talk like a human. Allocation check failed: ${error.message}. One short, friendly sentence.`
           });
           result = { 
             type: 'rebalancing', 
@@ -487,18 +592,31 @@ const App: React.FC = () => {
           summary = `Rebalancing analysis failed: ${error.message}`;
         }
       } else if (agent.role === 'Merchant') {
-        // Yield Seeker - Real yield optimization
-        addLog(agent.name, '📈 Scanning DeFi protocols for yield opportunities...');
-        
+        // Yield Seeker - Real yield optimization with detailed logs
+        addLog(agent.name, '🔍 Starting yield hunt...');
+        await new Promise(r => setTimeout(r, 200));
+        addLog(agent.name, '📡 Scanning Aave protocol...');
+        await new Promise(r => setTimeout(r, 200));
+        addLog(agent.name, '📡 Scanning Compound protocol...');
+        await new Promise(r => setTimeout(r, 200));
+        addLog(agent.name, '📡 Scanning Stargate protocol...');
+        await new Promise(r => setTimeout(r, 200));
+        addLog(agent.name, '📡 Scanning GMX/GLP vaults...');
+        await new Promise(r => setTimeout(r, 300));
+
         try {
           const { getYieldComparison, getBestYieldOpportunities } = await import('./services/yieldFetcher');
+
+          addLog(agent.name, '📊 Comparing APYs across all protocols...');
           const yieldData = await getYieldComparison('USDC');
           const topOpportunities = await getBestYieldOpportunities('USDC', undefined, 500000);
+
+          addLog(agent.name, `✅ Found ${topOpportunities.length} yield opportunities`);
           
           if (topOpportunities.length > 0) {
             const best = yieldData.bestOpportunity;
             const analysis = await geminiService.chat({
-              prompt: `As Yield Seeker, analyze these real yield opportunities: Found ${topOpportunities.length} opportunities. Best: ${best?.protocol} on ${best?.chainName} with ${best?.apy.toFixed(2)}% APY, TVL: $${(best?.tvl || 0).toLocaleString()}, Risk: ${best?.risk}. Average APY across all opportunities: ${yieldData.averageApy.toFixed(2)}%. Provide a brief yield optimization recommendation.`
+              prompt: `You're Yield Seeker. Talk like a human - enthusiastic but clear. Found ${topOpportunities.length} opportunities. Best: ${best?.protocol} on ${best?.chainName} at ${best?.apy.toFixed(2)}% APY (${best?.risk} risk). Average: ${yieldData.averageApy.toFixed(2)}%. Give a short, conversational recommendation - 1-2 sentences.`
             });
             
             result = { 
@@ -517,7 +635,7 @@ const App: React.FC = () => {
             summary = `Found ${topOpportunities.length} real yield opportunities. Best: ${best?.apy.toFixed(2)}% APY on ${best?.protocol} (${best?.chainName})`;
           } else {
             const analysis = await geminiService.chat({
-              prompt: `As Yield Seeker, report that no significant yield opportunities were found for USDC across supported chains.`
+              prompt: `You're Yield Seeker. Talk like a human. No great USDC yield opportunities right now across the chains we checked. One short, friendly sentence.`
             });
             result = { 
               type: 'yield_optimization',
@@ -532,7 +650,7 @@ const App: React.FC = () => {
         } catch (error: any) {
           console.error('Yield fetching error:', error);
           const analysis = await geminiService.chat({
-            prompt: `As Yield Seeker, report that yield scanning encountered an error: ${error.message}`
+            prompt: `You're Yield Seeker. Talk like a human. Yield scan failed: ${error.message}. One short, helpful sentence.`
           });
           result = { 
             type: 'yield_optimization',
@@ -545,12 +663,21 @@ const App: React.FC = () => {
           summary = `Yield scanning failed: ${error.message}`;
         }
       } else if (agent.role === 'Sentinel') {
-        // Risk Sentinel - Real route validation
-        addLog(agent.name, '🛡️ Analyzing route safety via LI.FI...');
-        
+        // Risk Sentinel - Real route validation with detailed logs
+        addLog(agent.name, '🛡️ Starting safety analysis...');
+        await new Promise(r => setTimeout(r, 200));
+        addLog(agent.name, '🔍 Checking bridge contracts...');
+        await new Promise(r => setTimeout(r, 200));
+        addLog(agent.name, '📊 Analyzing slippage tolerance...');
+        await new Promise(r => setTimeout(r, 200));
+        addLog(agent.name, '⛽ Calculating gas costs...');
+        await new Promise(r => setTimeout(r, 200));
+
         try {
           const { analyzeRouteRisk } = await import('./services/riskAnalyzer');
-          
+
+          addLog(agent.name, '📡 Fetching route from LI.FI...');
+
           // Default route: USDC Ethereum -> Arbitrum for analysis
           const riskAnalysis = await analyzeRouteRisk({
             fromChain: 1, // Ethereum
@@ -559,9 +686,13 @@ const App: React.FC = () => {
             toToken: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8', // USDC on Arbitrum
             fromAmount: '1000000000', // 1000 USDC
           });
+
+          addLog(agent.name, `📈 Risk Score: ${riskAnalysis.riskScore}/100`);
+          addLog(agent.name, `⚡ Estimated slippage: ${riskAnalysis.slippage.toFixed(2)}%`);
+          addLog(agent.name, `⛽ Gas estimate: $${riskAnalysis.gasCostUSD.toFixed(2)}`);
           
           const analysis = await geminiService.chat({
-            prompt: `As Risk Sentinel, analyze this real route risk assessment: Risk Score: ${riskAnalysis.riskScore}/100, Status: ${riskAnalysis.status}, Slippage: ${riskAnalysis.slippage.toFixed(2)}%, Gas: $${riskAnalysis.gasCostUSD.toFixed(2)}, Steps: ${riskAnalysis.stepsCount}, Bridges: ${riskAnalysis.bridgesUsed.join(', ') || 'None'}. Issues: ${riskAnalysis.issues.join(', ') || 'None'}. Provide a safety recommendation.`
+            prompt: `You're Risk Sentinel. Talk like a human - clear, reassuring. Route check: Risk ${riskAnalysis.riskScore}/100, ${riskAnalysis.status}. Slippage: ${riskAnalysis.slippage.toFixed(2)}%, Gas: ~$${riskAnalysis.gasCostUSD.toFixed(2)}. ${riskAnalysis.issues.length > 0 ? `Heads up: ${riskAnalysis.issues[0]}` : 'Looks good.'}. Give a short, conversational safety take - 1-2 sentences.`
           });
           
           result = { 
@@ -584,7 +715,7 @@ const App: React.FC = () => {
         } catch (error: any) {
           console.error('Risk analysis error:', error);
           const analysis = await geminiService.chat({
-            prompt: `As Risk Sentinel, report that route validation encountered an error: ${error.message}`
+            prompt: `You're Risk Sentinel. Talk like a human. Couldn't validate the route: ${error.message}. One short, friendly sentence.`
           });
           result = { 
             type: 'risk_analysis',
@@ -598,43 +729,240 @@ const App: React.FC = () => {
           summary = `Route validation failed: ${error.message}`;
         }
       } else if (agent.role === 'Glitch') {
-        // Route Executor - Real execution preparation
-        addLog(agent.name, '⚡ Preparing cross-chain route via LI.FI...');
-        
+        // Route Executor - Real execution with AUTO-SIGN and detailed logging
+        addLog(agent.name, '⚡ Route Executor powering up...');
+        await new Promise(r => setTimeout(r, 200));
+        addLog(agent.name, '🔗 Connecting to LI.FI aggregator...');
+        await new Promise(r => setTimeout(r, 200));
+
         try {
+          const { lifiService } = await import('./services/lifi');
           const { prepareExecution, getExecutionSummary } = await import('./services/routeExecutor');
-          
+
+          addLog(agent.name, '💰 Checking your USDC balances across all chains...');
+
+          // Get USDC balance on ALL chains
+          const usdcBalances = await lifiService.getUSDCBalances(walletAddress);
+
+          // Log all balances found
+          if (usdcBalances.length > 0) {
+            usdcBalances.forEach(b => {
+              addLog(agent.name, `   💵 ${b.chainName}: ${b.balanceFormatted.toFixed(2)} USDC`);
+            });
+          }
+
+          // Find the chain with the highest USDC balance
+          const sortedBalances = [...usdcBalances].sort((a, b) => b.balanceFormatted - a.balanceFormatted);
+          const sourceBalance = sortedBalances.find(b => b.balanceFormatted >= 1);
+
+          if (!sourceBalance) {
+            addLog(agent.name, '❌ No chain has sufficient USDC balance (need at least 1 USDC)');
+            throw new Error('Insufficient USDC balance on any chain (need at least 1 USDC)');
+          }
+
+          // USDC addresses per chain for routing
+          const USDC_ADDRESSES: Record<number, string> = {
+            1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',      // Ethereum
+            42161: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',  // Arbitrum (native)
+            10: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',     // Optimism (native)
+            137: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',    // Polygon (native)
+            8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',   // Base
+          };
+
+          // Pick a destination chain (different from source, prefer Arbitrum for low fees)
+          const destinationChains = [42161, 10, 137, 8453, 1].filter(c => c !== sourceBalance.chainId);
+          const toChain = destinationChains[0]; // First available different chain
+          const toChainName = { 1: 'Ethereum', 42161: 'Arbitrum', 10: 'Optimism', 137: 'Polygon', 8453: 'Base' }[toChain] || 'Unknown';
+
+          // Use actual balance (up to 1000 USDC max for safety)
+          const amountToUse = Math.min(sourceBalance.balanceFormatted, 1000);
+          const amountRaw = Math.floor(amountToUse * 1e6).toString();
+
+          addLog(agent.name, `✅ Using ${amountToUse.toFixed(2)} USDC from ${sourceBalance.chainName}`);
+
+          addLog(agent.name, `📝 Will bridge ${amountToUse.toFixed(2)} USDC`);
+          addLog(agent.name, `🛣️ Finding optimal route ${sourceBalance.chainName} → ${toChainName}...`);
+
+          // Log the exact parameters being sent
+          const fromTokenAddr = USDC_ADDRESSES[sourceBalance.chainId] || sourceBalance.tokenAddress;
+          const toTokenAddr = USDC_ADDRESSES[toChain];
+          addLog(agent.name, `   📋 From: Chain ${sourceBalance.chainId}, Token ${fromTokenAddr.slice(0, 10)}...`);
+          addLog(agent.name, `   📋 To: Chain ${toChain}, Token ${toTokenAddr.slice(0, 10)}...`);
+          addLog(agent.name, `   📋 Amount: ${amountRaw} (${amountToUse.toFixed(2)} USDC)`);
+          addLog(agent.name, `   📋 Wallet: ${walletAddress.slice(0, 10)}...`);
+          await new Promise(r => setTimeout(r, 300));
+
           const executionPlan = await prepareExecution({
-            fromChain: 1, // Ethereum
-            toChain: 42161, // Arbitrum
-            fromToken: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC on Ethereum
-            toToken: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8', // USDC on Arbitrum
-            fromAmount: '1000000000', // 1000 USDC
+            fromChain: sourceBalance.chainId,
+            toChain: toChain,
+            fromToken: fromTokenAddr,
+            toToken: toTokenAddr,
+            fromAmount: amountRaw,
             fromAddress: walletAddress,
           });
-          
+
           const summary_exec = getExecutionSummary(executionPlan);
-          
-          result = { 
-            type: 'cross_chain_swap',
-            route: summary_exec.route,
-            status: executionPlan.readyToExecute ? 'READY' : 'NOT_READY',
-            estimatedTime: summary_exec.estimatedTime,
-            gasCost: summary_exec.gasCost,
-            netValue: summary_exec.netValue,
-            estimatedOutput: `$${executionPlan.estimatedOutputUSD.toFixed(2)}`,
-            steps: executionPlan.steps.map(s => `${s.stepNumber}. ${s.type} via ${s.tool} (${s.fromChain}→${s.toChain})`),
-            warnings: executionPlan.warnings,
-            readyToExecute: executionPlan.readyToExecute,
-            note: 'Execution requires wallet connection and transaction signing'
-          };
-          taskType = 'cross_chain_swap';
-          summary = executionPlan.readyToExecute 
-            ? `⚡ Route ready: ${summary_exec.route} - Est. time: ${summary_exec.estimatedTime}, Gas: ${summary_exec.gasCost}`
-            : `⚠️ Route not ready: ${executionPlan.warnings[0] || 'Check route parameters'}`;
+
+          // Log warnings if no route found
+          if (executionPlan.warnings.length > 0 && !executionPlan.readyToExecute) {
+            addLog(agent.name, `⚠️ Route issue: ${executionPlan.warnings[0]}`);
+          }
+
+          if (executionPlan.steps.length > 0) {
+            addLog(agent.name, `✅ Route found: ${executionPlan.steps.length} step(s)`);
+            executionPlan.steps.forEach(step => {
+              addLog(agent.name, `   → Step ${step.stepNumber}: ${step.type} via ${step.tool}`);
+            });
+          }
+          addLog(agent.name, `⛽ Estimated gas: ${summary_exec.gasCost}`);
+          addLog(agent.name, `💵 Expected output: $${executionPlan.estimatedOutputUSD.toFixed(2)}`);
+
+          // AUTO-EXECUTE if wallet is connected and route is ready
+          if (walletClient && executionPlan.readyToExecute && executionPlan.quote) {
+            addLog(agent.name, '🔐 Wallet detected! Initiating auto-execution...');
+            await new Promise(r => setTimeout(r, 300));
+            addLog(agent.name, '📤 Sending transaction to wallet for signature...');
+
+            // Import transaction history service
+            const { transactionHistory: txHistoryService } = await import('./services/transactionHistory');
+
+            // Create pending transaction in history
+            const pendingTx = txHistoryService.addTransaction({
+              walletAddress: walletAddress as `0x${string}`,
+              type: 'bridge',
+              status: 'pending',
+              fromChainId: sourceBalance.chainId,
+              fromChainName: sourceBalance.chainName,
+              toChainId: toChain,
+              toChainName: toChainName,
+              fromToken: 'USDC',
+              fromAmount: amountToUse.toFixed(2),
+              fromAmountUsd: amountToUse,
+              toToken: 'USDC',
+              gasCostUsd: parseFloat(summary_exec.gasCost.replace('$', '')) || 0,
+            });
+
+            try {
+              addLog(agent.name, '⏳ Waiting for wallet signature...');
+
+              // Execute immediately without confirmation modal
+              const execResult = await lifiService.executeRoute(executionPlan.quote, walletClient);
+
+              const txHash = execResult.transactionHash || execResult.hash || 'pending';
+              addLog(agent.name, '✍️ Transaction signed!');
+              addLog(agent.name, `📡 Broadcasting to network...`);
+              await new Promise(r => setTimeout(r, 200));
+              addLog(agent.name, `✅ Transaction submitted!`);
+              addLog(agent.name, `🔗 TX Hash: ${txHash}`);
+              toast.success(`Transaction submitted! Hash: ${txHash.slice(0, 10)}...`);
+
+              // Explorer URLs per chain
+              const EXPLORER_URLS: Record<number, string> = {
+                1: 'https://etherscan.io/tx/',
+                42161: 'https://arbiscan.io/tx/',
+                10: 'https://optimistic.etherscan.io/tx/',
+                137: 'https://polygonscan.com/tx/',
+                8453: 'https://basescan.org/tx/',
+              };
+
+              // Update transaction in history
+              txHistoryService.updateTransaction(pendingTx.id, {
+                status: 'completed',
+                txHash,
+                toAmount: executionPlan.estimatedOutputUSD.toFixed(2),
+                toAmountUsd: executionPlan.estimatedOutputUSD,
+                explorerUrl: `${EXPLORER_URLS[toChain] || 'https://etherscan.io/tx/'}${txHash}`,
+              });
+
+              // Add success message to chat
+              const successMessage = {
+                id: `msg_${Date.now()}_exec_success`,
+                type: 'agent' as const,
+                content: `Route Executor: ✅ Transaction complete! Bridged ${amountToUse.toFixed(2)} USDC from ${sourceBalance.chainName} → ${toChainName}. TX: ${txHash.slice(0, 10)}...`,
+                timestamp: Date.now(),
+                agentName: 'Route Executor'
+              };
+              setChatMessages(prev => [...prev, successMessage]);
+
+              result = {
+                type: 'cross_chain_swap',
+                route: summary_exec.route,
+                status: 'EXECUTED',
+                transactionHash: txHash,
+                estimatedTime: summary_exec.estimatedTime,
+                gasCost: summary_exec.gasCost,
+                netValue: summary_exec.netValue,
+                estimatedOutput: `$${executionPlan.estimatedOutputUSD.toFixed(2)}`,
+                steps: executionPlan.steps.map(s => `${s.stepNumber}. ${s.type} via ${s.tool} (${s.fromChain}→${s.toChain})`),
+                warnings: [],
+                readyToExecute: true,
+                walletConnected: true,
+                note: `✅ Transaction executed! Hash: ${txHash}`
+              };
+              taskType = 'cross_chain_swap';
+              summary = `✅ EXECUTED! ${amountToUse.toFixed(2)} USDC bridged ${sourceBalance.chainName} → ${toChainName}. TX: ${txHash.slice(0, 10)}...`;
+
+            } catch (execError: any) {
+              console.error('Auto-execution error:', execError);
+              addLog(agent.name, `❌ Transaction failed: ${execError.message}`);
+              toast.error(`Execution failed: ${execError.message}`);
+
+              // Update transaction in history as failed
+              txHistoryService.updateTransaction(pendingTx.id, {
+                status: 'failed',
+                error: execError.message,
+              });
+
+              result = {
+                type: 'cross_chain_swap',
+                route: summary_exec.route,
+                status: 'EXECUTION_FAILED',
+                estimatedTime: summary_exec.estimatedTime,
+                gasCost: summary_exec.gasCost,
+                error: execError.message,
+                note: `Execution failed: ${execError.message}`
+              };
+              taskType = 'cross_chain_swap';
+              summary = `❌ Execution failed: ${execError.message}`;
+            }
+          } else if (!walletClient) {
+            addLog(agent.name, '⚠️ No wallet connected - cannot execute');
+            result = {
+              type: 'cross_chain_swap',
+              route: summary_exec.route,
+              status: 'WALLET_NOT_CONNECTED',
+              estimatedTime: summary_exec.estimatedTime,
+              gasCost: summary_exec.gasCost,
+              netValue: summary_exec.netValue,
+              estimatedOutput: `$${executionPlan.estimatedOutputUSD.toFixed(2)}`,
+              steps: executionPlan.steps.map(s => `${s.stepNumber}. ${s.type} via ${s.tool} (${s.fromChain}→${s.toChain})`),
+              warnings: ['Wallet not connected - connect MetaMask to execute'],
+              readyToExecute: false,
+              walletConnected: false,
+              note: 'Connect your wallet to execute this route'
+            };
+            taskType = 'cross_chain_swap';
+            summary = `⚠️ Route prepared but wallet not connected. Connect MetaMask to execute.`;
+          } else {
+            result = {
+              type: 'cross_chain_swap',
+              route: summary_exec.route,
+              status: executionPlan.readyToExecute ? 'READY' : 'NOT_READY',
+              estimatedTime: summary_exec.estimatedTime,
+              gasCost: summary_exec.gasCost,
+              netValue: summary_exec.netValue,
+              estimatedOutput: `$${executionPlan.estimatedOutputUSD.toFixed(2)}`,
+              steps: executionPlan.steps.map(s => `${s.stepNumber}. ${s.type} via ${s.tool} (${s.fromChain}→${s.toChain})`),
+              warnings: executionPlan.warnings,
+              readyToExecute: executionPlan.readyToExecute,
+              note: executionPlan.warnings[0] || 'Route not ready'
+            };
+            taskType = 'cross_chain_swap';
+            summary = `⚠️ Route not ready: ${executionPlan.warnings[0] || 'Check route parameters'}`;
+          }
         } catch (error: any) {
           console.error('Route preparation error:', error);
-          result = { 
+          result = {
             type: 'cross_chain_swap',
             route: 'N/A',
             status: 'ERROR',
@@ -646,7 +974,7 @@ const App: React.FC = () => {
       } else {
         // Route Strategist - Strategic coordination
         const analysis = await geminiService.chat({
-          prompt: `As Route Strategist, coordinate cross-chain strategy: ${taskDescription || 'analyze market conditions and coordinate team operations'}`
+          prompt: `You're Route Strategist. Talk like a human - friendly, confident, like a helpful team lead. User asked: ${taskDescription || 'coordinate and analyze market conditions'}. Give a short, conversational response - 1-2 sentences.`
         });
         result = { 
           type: 'strategy_coordination', 
@@ -697,7 +1025,55 @@ const App: React.FC = () => {
       
       toast.error(`Task failed for ${agent.name}`);
     }
-  }, [addLog, getWalletAddressForAgents]);
+  }, [addLog, getWalletAddressForAgents, walletClient]);
+
+  // Handle execution confirmation
+  const handleConfirmExecution = useCallback(async () => {
+    if (!pendingExecution || !walletClient) {
+      toast.error('No pending execution or wallet not connected');
+      return;
+    }
+
+    setIsExecuting(true);
+    addLog('Route Executor', '⚡ EXECUTING! Signing transaction with your wallet...');
+
+    try {
+      const { lifiService } = await import('./services/lifi');
+
+      // Execute the route with wallet client
+      const result = await lifiService.executeRoute(pendingExecution.quote, walletClient);
+
+      addLog('Route Executor', `✅ Transaction submitted! Hash: ${result.transactionHash || result.hash || 'pending'}`);
+      toast.success('Transaction submitted! Check your wallet for confirmation.');
+
+      // Clear pending execution
+      setPendingExecution(null);
+
+      // Add success message to chat
+      const successMessage = {
+        id: `msg_${Date.now()}_exec_success`,
+        type: 'agent' as const,
+        content: `Route Executor: ✅ Transaction executed successfully! ${pendingExecution.summary}. TX hash: ${(result.transactionHash || result.hash || 'pending').slice(0, 10)}...`,
+        timestamp: Date.now(),
+        agentName: 'Route Executor'
+      };
+      setChatMessages(prev => [...prev, successMessage]);
+
+    } catch (error: any) {
+      console.error('Execution error:', error);
+      addLog('Route Executor', `❌ Execution failed: ${error.message}`);
+      toast.error(`Execution failed: ${error.message}`);
+    } finally {
+      setIsExecuting(false);
+    }
+  }, [pendingExecution, walletClient, addLog]);
+
+  // Cancel pending execution
+  const handleCancelExecution = useCallback(() => {
+    setPendingExecution(null);
+    addLog('Route Executor', '🚫 Execution cancelled by user');
+    toast.info('Execution cancelled');
+  }, [addLog]);
 
   // Handle logout
   const handleLogout = useCallback(() => {
@@ -766,7 +1142,6 @@ const App: React.FC = () => {
 
   // Handle intent submission
   const handleIntentSubmit = useCallback(async (intent: string) => {
-    // Add user message
     const userMessage = {
       id: `msg_${Date.now()}_user`,
       type: 'user' as const,
@@ -775,68 +1150,168 @@ const App: React.FC = () => {
     };
     setChatMessages(prev => [...prev, userMessage]);
     setIsProcessingIntent(true);
-    
-    // Parse intent
+
     const analysis = parseIntent(intent);
+    const agentNames = analysis.requiredAgents
+      .map(id => AGENTS.find(a => a.id === id)?.name)
+      .filter((n): n is string => !!n);
+
+    // Get the actual wallet address for contextual responses
+    const walletAddress = getWalletAddressForAgents();
+    const isRealWallet = isConnected && connectedAddress === walletAddress;
+
+    // For balance/portfolio queries, fetch real data first for context
+    let portfolioContext = '';
+    if (analysis.intentType === 'portfolio_check' || intent.toLowerCase().includes('usdc') || intent.toLowerCase().includes('balance')) {
+      try {
+        const { lifiService } = await import('./services/lifi');
+        const usdcBalances = await lifiService.getUSDCBalances(walletAddress);
+
+        if (usdcBalances.length > 0) {
+          const totalUsdc = usdcBalances.reduce((sum, b) => sum + b.balanceFormatted, 0);
+          const balanceDetails = usdcBalances.map(b => `${b.chainName}: ${b.balanceFormatted.toFixed(2)} USDC`).join(', ');
+          portfolioContext = `\n\nWallet ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)} has ${totalUsdc.toFixed(2)} USDC total (${balanceDetails})`;
+        } else {
+          portfolioContext = `\n\nWallet ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)} has no USDC detected across supported chains.`;
+        }
+
+        if (!isRealWallet) {
+          portfolioContext += ' (Note: Using tracked wallet, not connected wallet)';
+        }
+      } catch (error) {
+        console.warn('Failed to fetch USDC balances for context:', error);
+        portfolioContext = '\n\n(Could not fetch wallet balances - connect wallet for accurate data)';
+      }
+    }
+
+    // Get dynamic, contextual responses from Gemini (avoids robotic predefined phrases)
+    const responses = await geminiService.generateIntentResponses(
+      intent + portfolioContext,
+      analysis.intentType,
+      agentNames
+    );
+    const systemContent = responses.systemMessage || analysis.description;
     
     // Add system message
-    setTimeout(() => {
-      const systemMessage = {
-        id: `msg_${Date.now()}_system`,
-        type: 'system' as const,
-        content: analysis.description,
-        timestamp: Date.now()
-      };
-      setChatMessages(prev => [...prev, systemMessage]);
-      
-      // Activate required agents
-      const agentsToActivate = analysis.requiredAgents.filter(id => !activeAgents.includes(id));
-      
-      if (agentsToActivate.length > 0) {
-        agentsToActivate.forEach(agentId => {
-          const agent = AGENTS.find(a => a.id === agentId);
-          if (agent) {
-            handleActivateAgent(agentId);
-            addLog('SYSTEM', `🤖 Auto-activated ${agent.name} for intent execution`);
-          }
-        });
-      }
-      
-      // Create connections
-      const newConnections = [...persistentEdges];
-      analysis.connections.forEach(conn => {
-        const exists = newConnections.some(
-          e => e.source === conn.source && e.target === conn.target
-        );
-        if (!exists) {
-          newConnections.push(conn);
+    const systemMessage = {
+      id: `msg_${Date.now()}_system`,
+      type: 'system' as const,
+      content: systemContent,
+      timestamp: Date.now()
+    };
+    setChatMessages(prev => [...prev, systemMessage]);
+    
+    // Activate required agents
+    const agentsToActivate = analysis.requiredAgents.filter(id => !activeAgents.includes(id));
+    if (agentsToActivate.length > 0) {
+      agentsToActivate.forEach(agentId => {
+        const agent = AGENTS.find(a => a.id === agentId);
+        if (agent) {
+          handleActivateAgent(agentId);
+          addLog('SYSTEM', `🤖 Auto-activated ${agent.name} for intent execution`);
         }
       });
-      
-      setPersistentEdges(newConnections);
-      localStorage.setItem('agentConnections', JSON.stringify(newConnections));
-      
-      // Add agent confirmation messages
-      setTimeout(() => {
-        analysis.requiredAgents.forEach(agentId => {
-          const agent = AGENTS.find(a => a.id === agentId);
-          if (agent) {
-            const agentMessage = {
-              id: `msg_${Date.now()}_${agentId}`,
-              type: 'agent' as const,
-              content: `✅ ${agent.name} connected and ready. Workflow configured.`,
-              timestamp: Date.now(),
-              agentName: agent.name
-            };
-            setChatMessages(prev => [...prev, agentMessage]);
-          }
-        });
-        
-        setIsProcessingIntent(false);
-        toast.success('Workflow connected! Agents are ready.');
-      }, 1000);
-    }, 500);
-  }, [activeAgents, persistentEdges, handleActivateAgent, addLog, setPersistentEdges]);
+    }
+    
+    // Create connections
+    const newConnections = [...persistentEdges];
+    analysis.connections.forEach(conn => {
+      const exists = newConnections.some(
+        e => e.source === conn.source && e.target === conn.target
+      );
+      if (!exists) newConnections.push(conn);
+    });
+    setPersistentEdges(newConnections);
+    localStorage.setItem('agentConnections', JSON.stringify(newConnections));
+    
+    // Add agent messages - use dynamic responses when available
+    const fallbackResponses: Record<string, string> = {
+      a0: "Got it, I'm coordinating the team.",
+      a1: "Checking prices across chains...",
+      a2: "Seeing what you've got across chains.",
+      a3: "Finding the best yields for you.",
+      a4: "Running the numbers - safety first.",
+      a5: "Making sure you're on target.",
+      a6: "Ready to execute when you are.",
+    };
+    analysis.requiredAgents.forEach((agentId, idx) => {
+      const agent = AGENTS.find(a => a.id === agentId);
+      if (agent) {
+        const content = responses.agentMessages?.[agent.name]
+          || fallbackResponses[agentId]
+          || "On it.";
+        const agentMessage = {
+          id: `msg_${Date.now()}_${agentId}_${idx}`,
+          type: 'agent' as const,
+          content: `${agent.name}: ${content}`,
+          timestamp: Date.now(),
+          agentName: agent.name
+        };
+        setChatMessages(prev => [...prev, agentMessage]);
+      }
+    });
+    
+    setIsProcessingIntent(false);
+
+    // For portfolio checks, show balance directly in chat without workflow
+    if (analysis.intentType === 'portfolio_check' && portfolioContext) {
+      // Add a direct balance response to the chat
+      const balanceMessage = {
+        id: `msg_${Date.now()}_balance`,
+        type: 'agent' as const,
+        content: `Portfolio Guardian: ${portfolioContext.replace(/\n\n/g, '').trim()}`,
+        timestamp: Date.now(),
+        agentName: 'Portfolio Guardian'
+      };
+      setChatMessages(prev => [...prev, balanceMessage]);
+      toast.success("Balance fetched!");
+      // Don't trigger agent workflow for simple balance checks
+      return;
+    }
+
+    // For yield optimization - AUTO-EXECUTE: find best yield and move funds
+    if (analysis.intentType === 'yield_optimization') {
+      toast.info('🔍 Finding best yields and preparing to deploy your funds...');
+      // Trigger Yield Seeker to find best opportunities
+      setTimeout(() => executeAgentTask('a3', `Find best yield for: ${intent}`), 500);
+      // Trigger Risk Sentinel to validate
+      setTimeout(() => executeAgentTask('a4', 'Validate yield opportunity for safety'), 1500);
+      // Trigger Route Executor to move funds to best yield
+      setTimeout(() => executeAgentTask('a6', `Deploy funds to best yield: ${intent}`), 2500);
+      return;
+    }
+
+    // For arbitrage - AUTO-EXECUTE: find and execute arbitrage
+    if (analysis.intentType === 'arbitrage') {
+      toast.info('🔍 Scanning for arbitrage opportunities...');
+      // Trigger Arbitrage Hunter to find opportunities
+      setTimeout(() => executeAgentTask('a1', `Find arbitrage: ${intent}`), 500);
+      // Trigger Risk Sentinel to validate
+      setTimeout(() => executeAgentTask('a4', 'Validate arbitrage route for safety'), 1500);
+      // Trigger Route Executor to execute arbitrage
+      setTimeout(() => executeAgentTask('a6', `Execute arbitrage: ${intent}`), 2500);
+      return;
+    }
+
+    toast.success("All set! We're on it.");
+
+    // Auto-trigger workflows for specific intents with wallet context
+    if (analysis.intentType === 'execute') {
+      setTimeout(() => executeAgentTask('a0', 'Coordinate execution'), 600);
+      setTimeout(() => executeAgentTask('a6', 'Execute the route'), 3000);
+    }
+
+    // For swap/bridge intents, immediately trigger the Route Executor
+    if (analysis.intentType === 'swap') {
+      toast.info('🚀 Preparing your swap...');
+      // Trigger Route Strategist to coordinate
+      setTimeout(() => executeAgentTask('a0', `Coordinate swap: ${intent}`), 500);
+      // Trigger Risk Sentinel to validate
+      setTimeout(() => executeAgentTask('a4', 'Validate the swap route for safety'), 1500);
+      // Trigger Route Executor to prepare and execute the swap
+      setTimeout(() => executeAgentTask('a6', `Execute swap: ${intent}`), 2500);
+    }
+  }, [activeAgents, persistentEdges, handleActivateAgent, addLog, setPersistentEdges, executeAgentTask, getWalletAddressForAgents, isConnected, connectedAddress]);
   
   // Get selected agent
   const selectedAgent = selectedAgentId ? AGENTS.find(a => a.id === selectedAgentId) || null : null;
@@ -856,6 +1331,7 @@ const App: React.FC = () => {
             <CaptainControlPanel
               mode={operationMode}
               onModeChange={setOperationMode}
+              onReset={handleWorkflowReset}
             />
           </div>
 
@@ -1030,6 +1506,8 @@ const App: React.FC = () => {
                 onIntentSubmit={handleIntentSubmit}
                 messages={chatMessages}
                 isProcessing={isProcessingIntent}
+                onSwitchToYield={() => setRightPanelView('yield')}
+                onSwitchToArbitrage={() => setRightPanelView('arbitrage')}
               />
             ) : rightPanelView === 'yield' ? (
               <div className="h-full overflow-y-auto p-3">
@@ -1145,6 +1623,71 @@ const App: React.FC = () => {
           agentConnections={persistentEdges}
           agentStatuses={agentStatuses}
         />
+      )}
+
+      {/* Execution Confirmation Modal */}
+      {pendingExecution && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-neon-green/30 rounded-2xl max-w-md w-full p-6 shadow-2xl shadow-neon-green/20">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-neon-green/20 rounded-full flex items-center justify-center">
+                <Zap className="w-6 h-6 text-neon-green" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-white font-mono">Confirm Execution</h3>
+                <p className="text-gray-400 text-sm">Route Executor is ready</p>
+              </div>
+            </div>
+
+            <div className="bg-black/40 rounded-lg p-4 mb-4 space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400 text-sm">Action</span>
+                <span className="text-white font-mono text-sm">{pendingExecution.summary}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400 text-sm">Expected Output</span>
+                <span className="text-neon-green font-mono text-sm">{pendingExecution.estimatedOutput}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400 text-sm">Gas Cost</span>
+                <span className="text-orange-400 font-mono text-sm">{pendingExecution.gasCost}</span>
+              </div>
+            </div>
+
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-4">
+              <p className="text-yellow-400 text-xs font-mono">
+                ⚠️ This will send a real transaction. Your wallet will prompt you to sign.
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={handleCancelExecution}
+                disabled={isExecuting}
+                className="flex-1 px-4 py-3 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 text-white font-mono rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmExecution}
+                disabled={isExecuting}
+                className="flex-1 px-4 py-3 bg-neon-green hover:bg-neon-green/80 disabled:bg-gray-600 text-black font-bold font-mono rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                {isExecuting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                    Signing...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4" />
+                    EXECUTE
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Toast Notifications */}

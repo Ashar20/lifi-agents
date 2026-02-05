@@ -5,7 +5,8 @@
 import { config } from 'dotenv';
 config();
 
-import { LiFi } from '@lifi/sdk';
+import { LiFi, convertQuoteToRoute } from '@lifi/sdk';
+import { Wallet, JsonRpcProvider } from 'ethers';
 import { createWalletClient, http, parseUnits, formatUnits, Address } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { sepolia } from 'viem/chains';
@@ -190,30 +191,32 @@ async function main() {
     console.log(`   From: ${formatUnits(swapAmount, decimals)} USDC`);
     console.log(`   To: ~${formatUnits(BigInt(quote.estimate.toAmount), 18)} WETH`);
     console.log(`   Gas Cost: ~$${quote.estimate.gasCosts?.[0]?.amountUSD || '0'}`);
-    console.log(`   Steps: ${quote.steps.length}`);
+    console.log(`   Steps: ${quote.includedSteps?.length ?? 1}`);
 
     // Step 4: Execute the swap
     console.log('\n🚀 Executing swap via LI.FI...');
     console.log('   This will require wallet signature...\n');
 
-    const execution = await lifi.executeRoute(quote, {
-      async sendTransaction(txRequest: any) {
-        console.log('   📝 Sending transaction...');
-        const hash = await walletClient.sendTransaction({
-          to: txRequest.to as Address,
-          data: txRequest.data as `0x${string}`,
-          value: txRequest.value ? BigInt(txRequest.value) : undefined,
-          gas: txRequest.gasLimit ? BigInt(txRequest.gasLimit) : undefined,
-        });
-        console.log(`   ✅ Transaction sent: ${hash}`);
-        return { hash };
-      },
-      updateRouteHook(route: any) {
-        const step = route.steps?.[0];
+    // SDK v2: executeRoute(signer, route, settings)
+    const provider = new JsonRpcProvider(SEPOLIA_RPC);
+    const signer = new Wallet(privateKey, provider);
+    const route = convertQuoteToRoute(quote);
+
+    const execution = await lifi.executeRoute(signer, route, {
+      updateRouteHook(updatedRoute: any) {
+        const step = updatedRoute.steps?.[0];
         if (step?.execution?.status) {
           console.log(`   📍 Status: ${step.execution.status}`);
         }
       },
+      switchChainHook: async (chainId: number) => {
+        if (chainId !== sepolia.id) {
+          const newProvider = new JsonRpcProvider(SEPOLIA_RPC);
+          return new Wallet(privateKey, newProvider) as any;
+        }
+        return signer as any;
+      },
+      acceptExchangeRateUpdateHook: async () => true,
     });
 
     console.log('\n🎉 Swap completed successfully!');

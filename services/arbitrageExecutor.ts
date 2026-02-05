@@ -1,7 +1,9 @@
 // Cross-Chain Arbitrage Executor - Real execution via LI.FI
 // NO MOCKS - Real swaps and bridges on testnet/mainnet
+// SDK v2: executeRoute(signer, route, settings) - https://docs.li.fi/sdk/execute-routes
 
-import { LiFi } from '@lifi/sdk';
+import { LiFi, convertQuoteToRoute } from '@lifi/sdk';
+import { BrowserProvider } from 'ethers';
 import { createPublicClient, http, formatUnits, parseUnits, Address, erc20Abi } from 'viem';
 import { mainnet, arbitrum, optimism, polygon, base, sepolia, arbitrumSepolia, optimismSepolia, baseSepolia } from 'viem/chains';
 import { ArbitrageOpportunity, detectArbitrageOpportunities } from './priceFetcher';
@@ -383,43 +385,34 @@ export async function executeArbitrage(
     
     transactionHistory.updateTransaction(tx.id, { status: 'confirming' });
     
-    // Execute via LI.FI SDK
-    const execution = await lifi.executeRoute(plan.route, {
-      // Signer callback
-      async sendTransaction(txRequest: any) {
-        onStatusUpdate?.('Requesting wallet signature...');
-        
-        const hash = await walletClient.sendTransaction({
-          to: txRequest.to,
-          data: txRequest.data,
-          value: txRequest.value ? BigInt(txRequest.value) : undefined,
-          gas: txRequest.gasLimit ? BigInt(txRequest.gasLimit) : undefined,
-          chainId: txRequest.chainId,
-        });
-        
-        result.txHashes.push(hash);
-        onStatusUpdate?.(`Transaction sent: ${hash.slice(0, 10)}...`);
-        
-        return { hash };
-      },
-      
-      // Update callback
-      updateRouteHook(route: any) {
-        const currentStep = route.steps?.findIndex((s: any) => 
+    // Get ethers Signer (SDK v2 requires Signer, not walletClient)
+    const ethereum = (typeof window !== 'undefined' && (window as any).ethereum) ? (window as any).ethereum : null;
+    if (!ethereum) {
+      throw new Error('No wallet found. Please connect MetaMask or another Web3 wallet.');
+    }
+    const provider = new BrowserProvider(ethereum);
+    let signer = await provider.getSigner();
+    
+    // Convert quote (LifiStep) to Route - SDK v2 getQuote returns LifiStep
+    const route = convertQuoteToRoute(plan.route);
+    
+    // Execute via LI.FI SDK - correct signature: executeRoute(signer, route, settings)
+    const execution = await lifi.executeRoute(signer, route, {
+      updateRouteHook(updatedRoute: any) {
+        const currentStep = updatedRoute.steps?.findIndex((s: any) => 
           s.execution?.status === 'PENDING' || s.execution?.status === 'ACTION_REQUIRED'
         );
         
         if (currentStep !== undefined && currentStep >= 0 && plan.steps[currentStep]) {
           plan.steps[currentStep].status = 'executing';
-          const stepExecution = route.steps[currentStep]?.execution;
+          const stepExecution = updatedRoute.steps[currentStep]?.execution;
           if (stepExecution?.txHash) {
             plan.steps[currentStep].txHash = stepExecution.txHash;
           }
           onStatusUpdate?.(`Executing step ${currentStep + 1}...`, plan.steps[currentStep]);
         }
         
-        // Mark completed steps
-        route.steps?.forEach((s: any, i: number) => {
+        updatedRoute.steps?.forEach((s: any, i: number) => {
           if (s.execution?.status === 'DONE' && plan.steps[i]) {
             plan.steps[i].status = 'completed';
             if (s.execution.txHash) {
@@ -428,6 +421,16 @@ export async function executeArbitrage(
           }
         });
       },
+      switchChainHook: async (chainId: number) => {
+        await ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0x' + chainId.toString(16) }],
+        });
+        const newProvider = new BrowserProvider(ethereum);
+        signer = await newProvider.getSigner();
+        return signer as any;
+      },
+      acceptExchangeRateUpdateHook: async () => true,
     });
     
     // Mark all steps completed

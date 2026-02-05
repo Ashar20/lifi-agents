@@ -1,7 +1,9 @@
 // Yield Rotation Service - Real Cross-Chain Yield Optimization
 // NO MOCKS - Real LI.FI execution on testnet/mainnet
+// SDK v2: executeRoute(signer, route, settings) - https://docs.li.fi/sdk/execute-routes
 
-import { LiFi, ChainId } from '@lifi/sdk';
+import { LiFi, ChainId, convertQuoteToRoute } from '@lifi/sdk';
+import { BrowserProvider } from 'ethers';
 import { createPublicClient, http, formatUnits, parseUnits, Address, erc20Abi } from 'viem';
 import { mainnet, arbitrum, optimism, polygon, base, sepolia, arbitrumSepolia, optimismSepolia, baseSepolia } from 'viem/chains';
 import { transactionHistory, getExplorerUrl } from './transactionHistory';
@@ -400,29 +402,35 @@ export async function executeYieldRotation(
     onStatusUpdate?.('Requesting wallet signature...');
     transactionHistory.updateTransaction(tx.id, { status: 'confirming' });
     
-    // Execute via LI.FI SDK
-    const execution = await lifi.executeRoute(plan.route, {
-      // Signer callback for wagmi
-      async sendTransaction(txRequest: any) {
-        onStatusUpdate?.('Sending transaction...');
-        
-        const hash = await walletClient.sendTransaction({
-          to: txRequest.to,
-          data: txRequest.data,
-          value: txRequest.value ? BigInt(txRequest.value) : undefined,
-          gas: txRequest.gasLimit ? BigInt(txRequest.gasLimit) : undefined,
-        });
-        
-        return { hash };
-      },
-      
-      // Update callback
-      updateRouteHook(route: any) {
-        const step = route.steps?.[0];
+    // Get ethers Signer (SDK v2 requires Signer)
+    const ethereum = (typeof window !== 'undefined' && (window as any).ethereum) ? (window as any).ethereum : null;
+    if (!ethereum) {
+      throw new Error('No wallet found. Please connect MetaMask or another Web3 wallet.');
+    }
+    const provider = new BrowserProvider(ethereum);
+    let signer = await provider.getSigner();
+    
+    // Convert quote (LifiStep) to Route
+    const route = convertQuoteToRoute(plan.route);
+    
+    // Execute via LI.FI SDK - correct signature: executeRoute(signer, route, settings)
+    const execution = await lifi.executeRoute(signer, route, {
+      updateRouteHook(updatedRoute: any) {
+        const step = updatedRoute.steps?.[0];
         if (step?.execution?.status) {
           onStatusUpdate?.(`Step: ${step.execution.status}`);
         }
       },
+      switchChainHook: async (chainId: number) => {
+        await ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0x' + chainId.toString(16) }],
+        });
+        const newProvider = new BrowserProvider(ethereum);
+        signer = await newProvider.getSigner();
+        return signer as any;
+      },
+      acceptExchangeRateUpdateHook: async () => true,
     });
     
     onStatusUpdate?.('Transaction submitted!');
