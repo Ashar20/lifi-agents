@@ -24,7 +24,7 @@ export interface AgentMetadata {
   walletAddress: string;
   spriteSeed: string;
   avatar: string; // Path to local animated sprite (GIF or Lottie JSON)
-  avatarType?: 'gif' | 'lottie'; // Animation type
+  avatarType?: 'gif' | 'lottie' | 'image'; // Animation type
   status: 'idle' | 'negotiating' | 'streaming' | 'offline';
   personality?: AgentPersonality;
 }

@@ -37,7 +37,7 @@ export const IntentChat: React.FC<IntentChatProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isProcessing) return;
-    
+
     onIntentSubmit(input.trim());
     setInput('');
   };
@@ -52,9 +52,9 @@ export const IntentChat: React.FC<IntentChatProps> = ({
   ];
 
   return (
-    <div className="h-full flex flex-col bg-black/40 backdrop-blur-sm border-l border-white/10">
+    <div className="h-full flex flex-col bg-transparent">
       {/* Header */}
-      <div className="p-4 border-b border-white/10 bg-neon-green/5">
+      <div className="p-4 border-b border-white/10 bg-white/5 backdrop-blur-sm">
         <div className="flex items-center gap-2 mb-1">
           <MessageSquare className="w-5 h-5 text-neon-green" />
           <h2 className="text-neon-green font-bold font-mono text-sm uppercase tracking-wider">
@@ -74,8 +74,8 @@ export const IntentChat: React.FC<IntentChatProps> = ({
             </>
           ) : (
             <>
-              <AlertCircle className="w-3 h-3" />
-              <span>Connect wallet to execute transactions</span>
+              <AlertCircle className="w-3 h-3 text-red-400" />
+              <span className="text-red-400">Connect wallet</span>
             </>
           )}
         </div>
@@ -91,7 +91,7 @@ export const IntentChat: React.FC<IntentChatProps> = ({
                 What do you want to do with your funds?
               </p>
             </div>
-            
+
             <div className="space-y-2">
               <p className="text-xs text-gray-500 font-mono uppercase tracking-wider mb-2">
                 Example Intents:
@@ -112,9 +112,8 @@ export const IntentChat: React.FC<IntentChatProps> = ({
             {messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`flex gap-2 ${
-                  msg.type === 'user' ? 'justify-end' : 'justify-start'
-                }`}
+                className={`flex gap-2 ${msg.type === 'user' ? 'justify-end' : 'justify-start'
+                  }`}
               >
                 {msg.type !== 'user' && (
                   <div className="w-6 h-6 rounded-full bg-neon-green/20 flex items-center justify-center flex-shrink-0 mt-1">
@@ -126,13 +125,12 @@ export const IntentChat: React.FC<IntentChatProps> = ({
                   </div>
                 )}
                 <div
-                  className={`max-w-[80%] rounded-lg p-3 ${
-                    msg.type === 'user'
-                      ? 'bg-neon-green/20 border border-neon-green/30 text-white'
+                  className={`max-w-[80%] rounded-lg p-3 ${msg.type === 'user'
+                      ? 'bg-neon-green/10 border border-neon-green/30 text-white shadow-[0_0_10px_rgba(57,255,20,0.1)]'
                       : msg.type === 'agent'
-                      ? 'bg-blue-500/20 border border-blue-500/30 text-blue-200'
-                      : 'bg-white/5 border border-white/10 text-gray-300'
-                  }`}
+                        ? 'bg-blue-500/10 border border-blue-500/30 text-blue-200'
+                        : 'bg-white/5 border border-white/10 text-gray-300'
+                    }`}
                 >
                   {msg.type === 'agent' && msg.agentName && (
                     <div className="text-[10px] font-mono text-blue-400 mb-1 uppercase tracking-wider">
@@ -180,7 +178,7 @@ export const IntentChat: React.FC<IntentChatProps> = ({
             onChange={(e) => setInput(e.target.value)}
             placeholder="e.g. Make best use of 1 USDC from my wallet..."
             disabled={isProcessing}
-            className="flex-1 px-4 py-2 bg-black/40 border border-white/20 rounded-lg text-white placeholder-gray-500 focus:border-neon-green focus:outline-none font-mono text-sm disabled:opacity-50"
+            className="flex-1 px-4 py-2 bg-black/40 border border-white/10 rounded-lg text-white placeholder-gray-600 focus:border-neon-green/50 focus:bg-black/60 focus:outline-none font-mono text-sm disabled:opacity-50 transition-all"
           />
           <button
             type="submit"
@@ -190,7 +188,7 @@ export const IntentChat: React.FC<IntentChatProps> = ({
             <Send className="w-4 h-4" />
           </button>
         </div>
-              <p className="text-[10px] text-gray-500 mt-2 font-mono">
+        <p className="text-[10px] text-gray-500 mt-2 font-mono">
           Just type naturally - we'll figure it out
         </p>
       </form>

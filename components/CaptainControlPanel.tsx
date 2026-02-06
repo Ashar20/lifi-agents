@@ -13,15 +13,15 @@ export const CaptainControlPanel: React.FC<CaptainControlPanelProps> = ({
   onReset
 }) => {
   return (
-    <div className="bg-black/90 backdrop-blur-md border border-neon-green/30 rounded-lg shadow-lg shadow-neon-green/10 p-2 space-y-2">
+    <div className="bg-white/5 backdrop-blur-md border border-neon-green/30 rounded-lg shadow-[0_0_15px_rgba(67,255,77,0.1)] p-2 space-y-2">
       {/* Mode Toggle */}
       <div className="flex items-center gap-1 bg-black/50 rounded-lg p-0.5 border border-white/10">
         <button
           onClick={() => onModeChange('manual')}
           className={`
             flex items-center gap-1.5 px-3 py-2 rounded text-xs font-bold font-mono transition-all flex-1 justify-center
-            ${mode === 'manual' 
-              ? 'bg-neon-green text-black shadow-sm' 
+            ${mode === 'manual'
+              ? 'bg-neon-green text-black shadow-sm'
               : 'text-white/50 hover:text-white/80'
             }
           `}
@@ -34,8 +34,8 @@ export const CaptainControlPanel: React.FC<CaptainControlPanelProps> = ({
           onClick={() => onModeChange('auto')}
           className={`
             flex items-center gap-1.5 px-3 py-2 rounded text-xs font-bold font-mono transition-all flex-1 justify-center
-            ${mode === 'auto' 
-              ? 'bg-neon-green text-black shadow-sm' 
+            ${mode === 'auto'
+              ? 'bg-neon-green text-black shadow-sm'
               : 'text-white/50 hover:text-white/80'
             }
           `}

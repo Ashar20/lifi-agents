@@ -17,15 +17,15 @@ const UserBar: React.FC<UserBarProps> = ({ onLogoClick, onLogout }) => {
   };
 
   return (
-    <div className="relative z-[100] bg-black/40 backdrop-blur-sm border-b border-white/10 px-6 py-3">
+    <div className="relative z-[100] bg-transparent backdrop-blur-[2px] border-b border-white/5 px-6 py-3">
       <div className="flex items-center justify-between">
         {/* Logo */}
         <button
           onClick={onLogoClick}
           className="flex items-center gap-3 hover:opacity-80 transition-opacity"
         >
-          <div className="w-10 h-10 bg-neon-green rounded-full flex items-center justify-center">
-            <span className="text-black font-bold text-lg">LI</span>
+          <div className="w-10 h-10 bg-neon-green/10 border border-neon-green/50 rounded-full flex items-center justify-center shadow-[0_0_10px_rgba(57,255,20,0.2)]">
+            <span className="text-neon-green font-bold text-lg font-mono">LI</span>
           </div>
           <div>
             <h1 className="text-white font-bold text-xl">LI.FI Agents</h1>

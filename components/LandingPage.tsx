@@ -1,8 +1,9 @@
 import React from 'react';
 import { Layers, Zap, Shield, Network, ArrowRight, Activity, Cpu, Hexagon } from 'lucide-react';
-import LottieAvatar from './LottieAvatar';
 import StarField from './ui/StarField';
-import HoloCard from './ui/HoloCard';
+import SpotlightCard from './ui/SpotlightCard'; // [NEW] - replacing HoloCard
+import Magnet from './ui/Magnet'; // [NEW]
+import ShinyText from './ui/ShinyText'; // [NEW]
 
 interface LandingPageProps {
   onLaunchApp: () => void;
@@ -34,36 +35,38 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLaunchApp }) => {
               </h1>
             </div>
           </div>
-          <button
-            onClick={onLaunchApp}
-            className="group relative px-6 py-2 bg-transparent overflow-hidden rounded border border-neon-green/30 hover:border-neon-green/80 transition-all duration-300"
-          >
-            <div className="absolute inset-0 bg-neon-green/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-            <span className="relative flex items-center gap-2 text-neon-green font-mono font-bold tracking-wider text-sm">
-              <span className="w-2 h-2 rounded-full bg-neon-green animate-pulse"></span>
-              LAUNCH TERMINAL <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
-            </span>
-          </button>
+          <Magnet>
+            <button
+              onClick={onLaunchApp}
+              className="group relative px-6 py-2 bg-transparent overflow-hidden rounded border border-neon-green/30 hover:border-neon-green/80 transition-all duration-300"
+            >
+              <div className="absolute inset-0 bg-neon-green/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+              <span className="relative flex items-center gap-2 text-neon-green font-mono font-bold tracking-wider text-sm">
+                <span className="w-2 h-2 rounded-full bg-neon-green animate-pulse"></span>
+                LAUNCH TERMINAL <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+              </span>
+            </button>
+          </Magnet>
         </header>
 
         {/* Hero Section */}
         <main className="flex-1 flex flex-col items-center justify-center text-center px-6 py-20 relative">
           <div className="max-w-5xl mx-auto space-y-8 relative z-10">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 backdrop-blur-md animate-fade-in">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 backdrop-blur-md animate-fade-in hover:border-neon-green/30 transition-colors">
               <span className="w-2 h-2 rounded-full bg-neon-green animate-pulse"></span>
               <span className="text-xs font-mono text-neon-green tracking-[0.2em] uppercase">System Operational v2.0</span>
             </div>
 
             <h1 className="text-6xl md:text-8xl font-black font-mono tracking-tighter leading-tight relative">
               <div className="absolute -inset-1 text-transparent bg-clip-text bg-gradient-to-b from-white/10 to-transparent blur-xl select-none pointer-events-none">
-                CROSS-CHAIN
+                <ShinyText speed={3}>CROSS-CHAIN</ShinyText>
                 <br />
-                INTELLIGENCE
+                <ShinyText speed={4}>INTELLIGENCE</ShinyText>
               </div>
               <span className="bg-clip-text text-transparent bg-gradient-to-b from-white via-gray-200 to-gray-500">
-                CROSS-CHAIN
+                <ShinyText speed={3}>CROSS-CHAIN</ShinyText>
                 <br />
-                INTELLIGENCE
+                <ShinyText speed={4}>INTELLIGENCE</ShinyText>
               </span>
             </h1>
 
@@ -74,26 +77,30 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLaunchApp }) => {
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-6 pt-8">
-              <button
-                onClick={onLaunchApp}
-                className="group relative px-8 py-4 bg-neon-green text-black font-mono font-bold tracking-wider text-lg rounded overflow-hidden hover:scale-105 transition-all duration-300 shadow-[0_0_20px_rgba(57,255,20,0.4)]"
-              >
-                <div className="absolute inset-0 bg-white/40 translate-y-full group-hover:translate-y-0 transition-transform duration-300 skew-y-12"></div>
-                <span className="relative flex items-center gap-2">
-                  <Zap size={20} className="fill-current" />
-                  INITIALIZE SYSTEM
-                </span>
-              </button>
+              <Magnet strength={30}>
+                <button
+                  onClick={onLaunchApp}
+                  className="group relative px-8 py-4 bg-neon-green text-black font-mono font-bold tracking-wider text-lg rounded overflow-hidden hover:scale-105 transition-all duration-300 shadow-[0_0_20px_rgba(57,255,20,0.4)]"
+                >
+                  <div className="absolute inset-0 bg-white/40 translate-y-full group-hover:translate-y-0 transition-transform duration-300 skew-y-12"></div>
+                  <span className="relative flex items-center gap-2">
+                    <Zap size={20} className="fill-current" />
+                    INITIALIZE SYSTEM
+                  </span>
+                </button>
+              </Magnet>
 
-              <a
-                href="https://github.com/lifinance"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-8 py-4 text-white font-mono font-bold tracking-wider text-lg rounded border border-white/20 hover:bg-white/5 transition-all duration-300 backdrop-blur-sm flex items-center gap-2"
-              >
-                <Network size={20} />
-                VIEW SOURCE
-              </a>
+              <Magnet strength={20}>
+                <a
+                  href="https://github.com/lifinance"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-8 py-4 text-white font-mono font-bold tracking-wider text-lg rounded border border-white/20 hover:bg-white/5 transition-all duration-300 backdrop-blur-sm flex items-center gap-2"
+                >
+                  <Network size={20} />
+                  VIEW SOURCE
+                </a>
+              </Magnet>
             </div>
           </div>
 
@@ -121,26 +128,26 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLaunchApp }) => {
           </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <HoloCard className="p-6 group">
+            <SpotlightCard className="p-6 group h-full">
               <Network className="text-neon-green mb-4 group-hover:scale-110 transition-transform duration-300" size={32} />
               <h3 className="text-lg font-bold font-mono text-white mb-2">Multi-Agent Swarm</h3>
               <p className="text-sm text-gray-400 leading-relaxed">Coordinated team of 7 specialized AI agents working in sync.</p>
-            </HoloCard>
-            <HoloCard className="p-6 group">
+            </SpotlightCard>
+            <SpotlightCard className="p-6 group h-full">
               <Activity className="text-blue-400 mb-4 group-hover:scale-110 transition-transform duration-300" size={32} />
               <h3 className="text-lg font-bold font-mono text-white mb-2">Real-Time Arb</h3>
               <p className="text-sm text-gray-400 leading-relaxed">Milliseconds latency arbitrage detection across chains.</p>
-            </HoloCard>
-            <HoloCard className="p-6 group">
+            </SpotlightCard>
+            <SpotlightCard className="p-6 group h-full">
               <Shield className="text-purple-400 mb-4 group-hover:scale-110 transition-transform duration-300" size={32} />
               <h3 className="text-lg font-bold font-mono text-white mb-2">Safety Sentinel</h3>
               <p className="text-sm text-gray-400 leading-relaxed">Automated risk analysis and bridge security validation.</p>
-            </HoloCard>
-            <HoloCard className="p-6 group">
+            </SpotlightCard>
+            <SpotlightCard className="p-6 group h-full">
               <Cpu className="text-orange-400 mb-4 group-hover:scale-110 transition-transform duration-300" size={32} />
               <h3 className="text-lg font-bold font-mono text-white mb-2">AI Core</h3>
               <p className="text-sm text-gray-400 leading-relaxed">Powered by Gemini for advanced reasoning and strategy.</p>
-            </HoloCard>
+            </SpotlightCard>
           </div>
         </div>
 

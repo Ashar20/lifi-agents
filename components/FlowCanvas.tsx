@@ -67,18 +67,13 @@ const AgentNode = React.memo(({ data }: NodeProps) => {
         
         {agent.avatarType === 'lottie' ? (
           <div className="w-full h-full p-2">
-            <LottieAvatar 
-              animationPath={spriteUrl}
-              width={64}
-              height={64}
-            />
+            <LottieAvatar animationPath={spriteUrl} width={64} height={64} />
           </div>
         ) : (
           <img 
             src={spriteUrl} 
             alt={agent.name}
-            className="w-full h-full object-contain p-2"
-            style={{ imageRendering: 'pixelated' }}
+            className="w-full h-full object-cover rounded-full"
           />
         )}
       </div>

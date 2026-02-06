@@ -53,7 +53,7 @@ class LifiCache {
       if (!item) return null;
 
       const entry: CacheEntry<T> = JSON.parse(item);
-      
+
       // Check expiration
       if (Date.now() > entry.expiresAt) {
         this.delete(key);
@@ -118,7 +118,7 @@ class DeFiRateLimiter {
   canMakeCall(service: string): boolean {
     const now = Date.now();
     const limit = this.limits[service];
-    
+
     if (!limit) return true; // No limit defined
 
     if (!this.calls[service]) {
@@ -173,7 +173,7 @@ class DeFiRateLimiter {
     const now = Date.now();
     const oldestCall = Math.min(...this.calls[service]);
     const resetTime = oldestCall + limit.windowMs;
-    
+
     return Math.max(0, resetTime - now);
   }
 }
@@ -212,37 +212,37 @@ export const geminiService = {
     if (!rateLimiter.canMakeCall('gemini')) {
       const waitTime = Math.ceil(rateLimiter.getTimeUntilReset('gemini') / 1000);
       console.warn(`⏳ Gemini rate limit reached. Wait ${waitTime}s.`);
-      return { 
-        text: `Rate limit: ${rateLimiter.getRemainingCalls('gemini')} calls remaining`, 
-        error: 'RATE_LIMITED' 
+      return {
+        text: `Rate limit: ${rateLimiter.getRemainingCalls('gemini')} calls remaining`,
+        error: 'RATE_LIMITED'
       };
     }
 
     try {
       rateLimiter.recordCall('gemini');
-      
+
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents: request.prompt,
       });
-      
+
       const text = response.text || 'No response';
-      
+
       return { text };
     } catch (error: any) {
       let errorMessage = 'AI service temporarily unavailable';
-      
+
       if (error?.message?.includes('overloaded')) {
         errorMessage = 'AI service is busy, please try again';
       } else if (error?.message?.includes('quota') || error?.message?.includes('429')) {
         errorMessage = 'Daily quota exceeded - AI disabled until reset';
       }
-      
+
       console.error('Gemini API error:', error);
-      
-      return { 
-        text: errorMessage, 
-        error: error instanceof Error ? error.message : 'UNKNOWN_ERROR' 
+
+      return {
+        text: errorMessage,
+        error: error instanceof Error ? error.message : 'UNKNOWN_ERROR'
       };
     }
   },
@@ -323,12 +323,12 @@ Generate a brief, professional status update (1-2 sentences max) about cross-cha
     try {
       rateLimiter.recordCall('gemini');
       const response = await this.chat({ prompt, temperature: 0.7 });
-      
+
       if (response.text && !response.error) {
         cache.set(cacheKey, response.text, 180);
         return response.text;
       }
-      
+
       return `${agentName}: Systems operational. Cross-chain protocols active.`;
     } catch (error) {
       console.warn('Dialogue generation error:', error);
@@ -395,3 +395,14 @@ if (typeof window !== 'undefined') {
   (window as any).geminiService = geminiService;
   console.log('%c🌐 LI.FI AGENTS ORCHESTRATOR', 'color: #00d4ff; font-weight: bold; font-size: 14px;');
 }
+
+// Mock services to satisfy App.tsx imports
+export const orchestrator = {
+  startMode: (mode: 'auto' | 'manual') => console.log('Orchestrator started:', mode),
+  stop: () => console.log('Orchestrator stopped'),
+};
+
+export const agentStatusManager = {
+  updateStatus: (agentId: string, status: string) => console.log('Status updated:', agentId, status),
+  getStatuses: () => ({}),
+};

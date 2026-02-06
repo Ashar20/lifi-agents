@@ -81,8 +81,7 @@ const AgentDetailPanel: React.FC<AgentDetailPanelProps> = ({
              ) : (
                <img 
                   src={agent.avatar} 
-                  className="w-full h-full object-contain relative z-10 drop-shadow-[0_5px_5px_rgba(0,0,0,0.5)]"
-                  style={{ imageRendering: 'pixelated' }}
+                  className="w-full h-full object-cover relative z-10 drop-shadow-[0_5px_5px_rgba(0,0,0,0.5)]"
                   alt={agent.name}
                />
              )}

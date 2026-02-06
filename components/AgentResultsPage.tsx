@@ -435,7 +435,6 @@ export const AgentResultsPage: React.FC<AgentResultsPageProps> = ({
                           src={spriteUrl} 
                           alt={agent.name} 
                           className="w-full h-full object-cover"
-                          style={{ imageRendering: 'pixelated' }}
                         />
                       )}
                     </div>
