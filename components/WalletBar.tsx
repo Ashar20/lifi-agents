@@ -112,7 +112,7 @@ const WalletBar: React.FC<WalletBarProps> = ({ onLogoClick }) => {
               className={`text-neon-green font-bold font-mono tracking-wider flex items-center gap-2 ${onLogoClick ? 'cursor-pointer hover:text-neon-green/80 transition-colors' : ''}`}
               onClick={onLogoClick}
             >
-                <Layers size={18} /> GALAXY AGENTS <span className="text-white/40 text-xs font-normal">v2.0.0</span>
+                <Layers size={18} /> LI.FI AGENTS <span className="text-white/40 text-xs font-normal">v1.0.0</span>
             </h1>
         </div>
 

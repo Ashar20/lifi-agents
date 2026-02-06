@@ -1,15 +1,16 @@
 // One-Click Yield Rotation Component with Auto-Execution
 // Real cross-chain yield optimization with wallet signing and auto-monitoring
+// Uses Arc (Circle CCTP) as liquidity hub for native USDC cross-chain transfers
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAccount, useWalletClient, useChainId } from 'wagmi';
-import { 
-  Zap, 
-  TrendingUp, 
-  Loader2, 
+import {
+  Zap,
+  TrendingUp,
+  Loader2,
   CheckCircle,
   Wallet,
-  AlertCircle, 
+  AlertCircle,
   ArrowRight,
   RefreshCw,
   ExternalLink,
@@ -36,6 +37,8 @@ import {
   MonitorState,
   ExecutionRecord,
 } from '../services/autoYieldMonitor';
+import { ArcBadge } from './ArcBadge';
+import { canUseArcRoute, getArcUsdcAddress } from '../services/arcIntegration';
 
 interface OneClickYieldProps {
   onLog?: (message: string, type?: 'info' | 'success' | 'error') => void;
@@ -749,6 +752,27 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
               </div>
             </div>
             
+            {/* Arc Badge - Show when USDC cross-chain transfer */}
+            {bestPlan.fromPosition.token === 'USDC' &&
+             bestPlan.fromPosition.chainId !== bestPlan.toOpportunity.chainId &&
+             canUseArcRoute(
+               bestPlan.fromPosition.chainId,
+               bestPlan.toOpportunity.chainId,
+               getArcUsdcAddress(bestPlan.fromPosition.chainId) || '',
+               getArcUsdcAddress(bestPlan.toOpportunity.chainId) || ''
+             ) && (
+              <div className="flex justify-center mb-3">
+                <ArcBadge
+                  isArcRoute={true}
+                  size="md"
+                  showDetails={true}
+                  sourceChain={bestPlan.fromPosition.chainName}
+                  destinationChain={bestPlan.toOpportunity.chainName}
+                  estimatedTime="~15 minutes"
+                />
+              </div>
+            )}
+
             {/* Execute Button */}
             <button
               onClick={handleExecute}
@@ -760,7 +784,7 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
               ) : (
                 <>
                   <Zap size={20} />
-                  Execute via LI.FI
+                  Execute via LI.FI + Arc
                 </>
               )}
             </button>

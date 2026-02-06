@@ -14,14 +14,14 @@ import {
   ARC_SUPPORTED_CHAINS,
 } from './arcIntegration';
 
-// RPC endpoints for balance queries
-const RPC_URLS: Record<number, string> = {
-  1: 'https://eth.llamarpc.com',
-  42161: 'https://arb1.arbitrum.io/rpc',
-  10: 'https://mainnet.optimism.io',
-  137: 'https://polygon-rpc.com',
-  8453: 'https://mainnet.base.org',
-  43114: 'https://api.avax.network/ext/bc/C/rpc',
+// RPC endpoints for balance queries (with fallbacks - more reliable endpoints first)
+const RPC_URLS: Record<number, string[]> = {
+  1: ['https://rpc.ankr.com/eth', 'https://eth.drpc.org', 'https://1rpc.io/eth', 'https://cloudflare-eth.com'],
+  42161: ['https://arb1.arbitrum.io/rpc', 'https://rpc.ankr.com/arbitrum'],
+  10: ['https://mainnet.optimism.io', 'https://rpc.ankr.com/optimism'],
+  137: ['https://polygon-rpc.com', 'https://rpc.ankr.com/polygon'],
+  8453: ['https://mainnet.base.org', 'https://rpc.ankr.com/base'],
+  43114: ['https://api.avax.network/ext/bc/C/rpc', 'https://rpc.ankr.com/avalanche'],
 };
 
 // ERC20 balanceOf ABI for direct RPC calls
@@ -33,61 +33,87 @@ const ERC20_BALANCE_ABI = [{
   "type": "function"
 }];
 
-// Direct RPC call to get ERC20 balance (fallback)
+// Direct RPC call to get ERC20 balance with fallback URLs
 async function getERC20BalanceDirect(
-  rpcUrl: string,
+  rpcUrls: string[],
   tokenAddress: string,
   walletAddress: string
 ): Promise<string> {
-  try {
-    // Encode balanceOf(address) call
-    const data = '0x70a08231' + walletAddress.slice(2).padStart(64, '0');
+  // Ensure addresses are lowercase and properly formatted
+  const normalizedWallet = walletAddress.toLowerCase();
+  const normalizedToken = tokenAddress.toLowerCase();
 
-    const response = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'eth_call',
-        params: [{ to: tokenAddress, data }, 'latest']
-      })
-    });
+  // Encode balanceOf(address) call - address must be 0-padded to 32 bytes
+  const data = '0x70a08231' + normalizedWallet.slice(2).padStart(64, '0');
 
-    const result = await response.json();
-    if (result.error) {
-      console.warn(`RPC error:`, result.error);
-      return '0';
+  // Try each RPC URL until one works
+  for (const rpcUrl of rpcUrls) {
+    try {
+      console.log(`[RPC] Trying ${rpcUrl} for ${normalizedToken}`);
+
+      const response = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: Date.now(),
+          method: 'eth_call',
+          params: [{ to: normalizedToken, data }, 'latest']
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.error) {
+        console.warn(`[RPC] Error from ${rpcUrl}:`, result.error);
+        continue; // Try next URL
+      }
+
+      if (!result.result || result.result === '0x' || result.result === '0x0') {
+        console.log(`[RPC] Zero balance from ${rpcUrl}`);
+        return '0';
+      }
+
+      // Convert hex to decimal string
+      const balance = BigInt(result.result).toString();
+      console.log(`[RPC] ✅ Balance: ${balance} from ${rpcUrl}`);
+      return balance;
+    } catch (error) {
+      console.warn(`[RPC] Failed with ${rpcUrl}:`, error);
+      continue; // Try next URL
     }
-
-    // Convert hex to decimal string
-    const balance = BigInt(result.result || '0x0').toString();
-    return balance;
-  } catch (error) {
-    console.warn(`Direct RPC balance check failed:`, error);
-    return '0';
   }
+
+  console.warn(`[RPC] All RPC URLs failed for balance check`);
+  return '0';
 }
 
 // Initialize SDK with LiFi class (SDK v2.x API) and RPC config
 // Note: integrator name must be max 23 characters
+// SDK expects single RPC URL per chain, so we use the first (primary) URL
 const lifi = new LiFi({
   integrator: 'lifi-agents-orch',
-  rpcUrls: RPC_URLS,
+  rpcUrls: Object.fromEntries(
+    Object.entries(RPC_URLS).map(([chainId, urls]) => [chainId, urls[0]])
+  ),
 });
 
 // Adapter: Convert viem WalletClient to ethers-compatible signer for LI.FI SDK
-// LI.FI SDK expects ethers-style signer with getAddress(), signMessage(), sendTransaction()
+// LI.FI SDK expects ethers-style signer with getAddress(), signMessage(), sendTransaction(), getChainId()
 function createViemToEthersSigner(walletClient: any) {
   if (!walletClient?.account?.address) {
     throw new Error('WalletClient must have an account connected');
   }
 
   const address = walletClient.account.address;
+  const chainId = walletClient.chain?.id || 1;
 
   return {
     // Required by LI.FI SDK
     getAddress: async () => address,
+
+    // Get chain ID - required by LI.FI SDK for route execution
+    getChainId: async () => chainId,
 
     // Sign a message (used for some bridges)
     signMessage: async (message: string | Uint8Array) => {
@@ -134,9 +160,10 @@ function createViemToEthersSigner(walletClient: any) {
     // Provider access (for chain ID, etc.)
     provider: {
       getNetwork: async () => ({
-        chainId: walletClient.chain?.id || 1,
+        chainId: chainId,
         name: walletClient.chain?.name || 'unknown',
       }),
+      getChainId: async () => chainId,
     },
 
     // For type checking - indicates this is a signer
@@ -256,19 +283,40 @@ export const lifiService = {
     const balances: WalletTokenBalance[] = [];
     const chainIds = Object.keys(USDC_ADDRESSES).map(Number);
 
-    console.log(`[LI.FI] Fetching USDC balances for wallet: ${walletAddress}`);
+    // Normalize wallet address
+    const normalizedWallet = walletAddress.toLowerCase();
+
+    console.log(`[LI.FI] 🔍 Scanning USDC balances across ${chainIds.length} chains for wallet: ${walletAddress}`);
+    console.log(`[LI.FI] Chains: ${chainIds.map(id => CHAIN_NAMES[id] || id).join(', ')}`);
 
     const balancePromises = chainIds.map(async (chainId) => {
+      const chainName = CHAIN_NAMES[chainId] || `Chain ${chainId}`;
       try {
         const tokenAddress = USDC_ADDRESSES[chainId];
-        const rpcUrl = RPC_URLS[chainId];
+        const rpcUrls = RPC_URLS[chainId];
+
+        console.log(`[LI.FI] 📡 Querying ${chainName} (chain ${chainId})...`);
 
         // Try direct RPC call first (more reliable)
         let balanceRaw = '0';
-        if (rpcUrl) {
-          console.log(`[LI.FI] Direct RPC balance check for chain ${chainId}...`);
-          balanceRaw = await getERC20BalanceDirect(rpcUrl, tokenAddress, walletAddress);
-          console.log(`[LI.FI] Direct RPC result for chain ${chainId}: ${balanceRaw}`);
+        if (rpcUrls && rpcUrls.length > 0) {
+          balanceRaw = await getERC20BalanceDirect(rpcUrls, tokenAddress, normalizedWallet);
+        }
+
+        // If direct RPC fails or returns 0, try LI.FI SDK as fallback
+        if (balanceRaw === '0') {
+          try {
+            const token = await lifi.getToken(chainId, tokenAddress);
+            if (token) {
+              const sdkBalance = await lifi.getTokenBalance(normalizedWallet, token);
+              if (sdkBalance && sdkBalance.amount && sdkBalance.amount !== '0') {
+                balanceRaw = sdkBalance.amount;
+                console.log(`[LI.FI] SDK fallback returned balance: ${balanceRaw}`);
+              }
+            }
+          } catch (sdkError) {
+            console.warn(`[LI.FI] SDK balance fallback failed for ${chainName}:`, sdkError);
+          }
         }
 
         // Get token info from LI.FI for metadata
@@ -278,9 +326,11 @@ export const lifiService = {
 
         // Skip if zero balance
         if (balanceFormatted === 0) {
-          console.log(`[LI.FI] Zero balance on chain ${chainId}, skipping`);
+          console.log(`[LI.FI] ⚪ ${chainName}: 0 USDC`);
           return null;
         }
+
+        console.log(`[LI.FI] ✅ ${chainName}: ${balanceFormatted.toFixed(4)} USDC (raw: ${balanceRaw})`);
 
         return {
           chainId,
@@ -296,7 +346,7 @@ export const lifiService = {
           logoURI: token?.logoURI,
         };
       } catch (error) {
-        console.error(`[LI.FI] Failed to get USDC balance for chain ${chainId}:`, error);
+        console.error(`[LI.FI] ❌ Failed to get USDC balance for ${chainName}:`, error);
         return null;
       }
     });
@@ -308,7 +358,7 @@ export const lifiService = {
       }
     });
 
-    console.log(`[LI.FI] Final USDC balances:`, balances);
+    console.log(`[LI.FI] 📊 Final USDC balances across all chains:`, balances.map(b => `${b.chainName}: ${b.balanceFormatted.toFixed(4)}`));
     return balances;
   },
 
@@ -491,7 +541,8 @@ export const lifiService = {
 
       // Create ethers-compatible signer adapter from viem WalletClient
       // LI.FI SDK expects ethers-style signer with getAddress(), signMessage(), sendTransaction()
-      const signer = createViemToEthersSigner(walletClient);
+      // Cast to 'any' to bypass strict type checking - we implement only the methods LI.FI actually uses
+      const signer = createViemToEthersSigner(walletClient) as any;
 
       console.log('[LI.FI] Executing route with adapted signer...');
       const result = await lifi.executeRoute(signer, route, settings);

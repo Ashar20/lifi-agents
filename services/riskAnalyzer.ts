@@ -204,24 +204,25 @@ export async function analyzeRouteRisk(
 export async function quickRiskCheck(
   fromChain: number,
   toChain: number,
-  amount: string
+  amount: string,
+  fromAddress?: string
 ): Promise<{
   safe: boolean;
   riskLevel: 'low' | 'medium' | 'high';
   message: string;
 }> {
-  // USDC addresses for common chains
+  // Native USDC addresses for common chains
   const usdcAddresses: Record<number, string> = {
-    1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-    42161: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8',
-    10: '0x7F5c764cBc14f9669B88837ca1490cCa17c31607',
-    137: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
-    8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',      // Ethereum
+    42161: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',  // Arbitrum (native USDC)
+    10: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',     // Optimism (native USDC)
+    137: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',    // Polygon (native USDC)
+    8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',   // Base
   };
-  
+
   const fromToken = usdcAddresses[fromChain];
   const toToken = usdcAddresses[toChain];
-  
+
   if (!fromToken || !toToken) {
     return {
       safe: false,
@@ -229,15 +230,16 @@ export async function quickRiskCheck(
       message: 'Unsupported chain for quick check',
     };
   }
-  
+
   const analysis = await analyzeRouteRisk({
     fromChain,
     toChain,
     fromToken,
     toToken,
     fromAmount: amount,
+    fromAddress,
   });
-  
+
   return {
     safe: analysis.isValid,
     riskLevel: analysis.riskScore <= 30 ? 'low' : analysis.riskScore <= 60 ? 'medium' : 'high',

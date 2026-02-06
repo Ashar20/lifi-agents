@@ -60,8 +60,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full mb-4">
             <User size={40} className="text-white" />
           </div>
-          <h1 className="text-4xl font-bold text-white mb-2">Galaxy Agents</h1>
-          <p className="text-gray-400">Autonomous AI Agent Intelligence Network</p>
+          <h1 className="text-4xl font-bold text-white mb-2">LI.FI Agents</h1>
+          <p className="text-gray-400">Cross-Chain DeFi Orchestrator</p>
         </div>
 
         {/* Login/Register Form */}
@@ -171,7 +171,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
         {/* Footer */}
         <p className="text-center text-gray-500 text-sm mt-8">
-          © 2026 Galaxy Agents. All rights reserved.
+          © 2026 LI.FI Agents Orchestrator. Built for HackMoney 2026.
         </p>
       </div>
     </div>

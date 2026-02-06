@@ -13,22 +13,22 @@ const lifi = new LiFi({
   integrator: 'lifi-agents-orchestrator',
 });
 
-// Supported chains configuration
+// Supported chains configuration with fallback RPCs
 export const SUPPORTED_CHAINS = {
-  // Mainnet
+  // Mainnet - with fallback RPC endpoints (Ethereum first with multiple reliable options)
   mainnet: [
-    { id: 1, name: 'Ethereum', chain: mainnet, rpc: 'https://eth.llamarpc.com' },
-    { id: 42161, name: 'Arbitrum', chain: arbitrum, rpc: 'https://arb1.arbitrum.io/rpc' },
-    { id: 10, name: 'Optimism', chain: optimism, rpc: 'https://mainnet.optimism.io' },
-    { id: 137, name: 'Polygon', chain: polygon, rpc: 'https://polygon-rpc.com' },
-    { id: 8453, name: 'Base', chain: base, rpc: 'https://mainnet.base.org' },
+    { id: 1, name: 'Ethereum', chain: mainnet, rpcs: ['https://rpc.ankr.com/eth', 'https://eth.drpc.org', 'https://1rpc.io/eth', 'https://cloudflare-eth.com'] },
+    { id: 42161, name: 'Arbitrum', chain: arbitrum, rpcs: ['https://arb1.arbitrum.io/rpc', 'https://rpc.ankr.com/arbitrum'] },
+    { id: 10, name: 'Optimism', chain: optimism, rpcs: ['https://mainnet.optimism.io', 'https://rpc.ankr.com/optimism'] },
+    { id: 137, name: 'Polygon', chain: polygon, rpcs: ['https://polygon-rpc.com', 'https://rpc.ankr.com/polygon'] },
+    { id: 8453, name: 'Base', chain: base, rpcs: ['https://mainnet.base.org', 'https://rpc.ankr.com/base'] },
   ],
   // Testnet
   testnet: [
-    { id: 11155111, name: 'Sepolia', chain: sepolia, rpc: 'https://rpc.sepolia.org' },
-    { id: 421614, name: 'Arbitrum Sepolia', chain: arbitrumSepolia, rpc: 'https://sepolia-rollup.arbitrum.io/rpc' },
-    { id: 11155420, name: 'Optimism Sepolia', chain: optimismSepolia, rpc: 'https://sepolia.optimism.io' },
-    { id: 84532, name: 'Base Sepolia', chain: baseSepolia, rpc: 'https://sepolia.base.org' },
+    { id: 11155111, name: 'Sepolia', chain: sepolia, rpcs: ['https://rpc.sepolia.org', 'https://rpc.ankr.com/eth_sepolia'] },
+    { id: 421614, name: 'Arbitrum Sepolia', chain: arbitrumSepolia, rpcs: ['https://sepolia-rollup.arbitrum.io/rpc'] },
+    { id: 11155420, name: 'Optimism Sepolia', chain: optimismSepolia, rpcs: ['https://sepolia.optimism.io'] },
+    { id: 84532, name: 'Base Sepolia', chain: baseSepolia, rpcs: ['https://sepolia.base.org'] },
   ],
 };
 
@@ -61,7 +61,7 @@ export const MAINNET_TOKENS: Record<number, Record<string, Address>> = {
   1: {
     USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
     USDT: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-    DAI: '0x6B175474E89094C44Da98b954EesA1dcB5e7E15',
+    DAI: '0x6B175474E89094C44Da98b954EedeAC495271d0F',
     WETH: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
   },
   42161: {
@@ -131,19 +131,48 @@ export interface ExecutionResult {
   route?: any;
 }
 
-// Create public clients for each chain
-function getPublicClient(chainId: number, isTestnet: boolean = false) {
+// Create public clients for each chain with fallback RPCs
+function getPublicClient(chainId: number, isTestnet: boolean = false, rpcIndex: number = 0) {
   const chains = isTestnet ? SUPPORTED_CHAINS.testnet : SUPPORTED_CHAINS.mainnet;
   const chainConfig = chains.find(c => c.id === chainId);
-  
+
   if (!chainConfig) {
     throw new Error(`Unsupported chain: ${chainId}`);
   }
-  
+
+  // Use the specified RPC index, default to first
+  const rpcUrl = chainConfig.rpcs[rpcIndex] || chainConfig.rpcs[0];
+
   return createPublicClient({
     chain: chainConfig.chain,
-    transport: http(chainConfig.rpc),
+    transport: http(rpcUrl),
   });
+}
+
+// Try RPC call with fallbacks
+async function tryWithFallbackRpcs<T>(
+  chainId: number,
+  isTestnet: boolean,
+  operation: (client: ReturnType<typeof createPublicClient>) => Promise<T>
+): Promise<T | null> {
+  const chains = isTestnet ? SUPPORTED_CHAINS.testnet : SUPPORTED_CHAINS.mainnet;
+  const chainConfig = chains.find(c => c.id === chainId);
+
+  if (!chainConfig) return null;
+
+  for (let i = 0; i < chainConfig.rpcs.length; i++) {
+    try {
+      const client = getPublicClient(chainId, isTestnet, i);
+      return await operation(client);
+    } catch (error) {
+      console.warn(`[Yield] RPC ${chainConfig.rpcs[i]} failed, trying next...`);
+      if (i === chainConfig.rpcs.length - 1) {
+        console.error(`[Yield] All RPCs failed for chain ${chainId}`);
+        throw error;
+      }
+    }
+  }
+  return null;
 }
 
 // Get token balances for a wallet across chains
@@ -154,34 +183,75 @@ export async function getWalletPositions(
   const positions: Position[] = [];
   const chains = isTestnet ? SUPPORTED_CHAINS.testnet : SUPPORTED_CHAINS.mainnet;
   const tokenAddresses = isTestnet ? TESTNET_TOKENS : MAINNET_TOKENS;
-  
-  for (const chain of chains) {
-    const client = getPublicClient(chain.id, isTestnet);
+
+  console.log(`[Yield] 🔍 Scanning ${chains.length} chains for wallet positions...`);
+  console.log(`[Yield] Chains: ${chains.map(c => c.name).join(', ')}`);
+  console.log(`[Yield] Wallet address: ${walletAddress}`);
+
+  // Scan all chains in parallel for better performance
+  const chainPromises = chains.map(async (chain) => {
+    const chainPositions: Position[] = [];
+    const startTime = Date.now();
+    console.log(`[Yield] 📡 Starting scan for ${chain.name} (chain ID: ${chain.id}, ${chain.rpcs.length} RPC endpoints)...`);
+
     const tokens = tokenAddresses[chain.id];
-    
-    if (!tokens) continue;
-    
+
+    if (!tokens) {
+      console.log(`[Yield] ⚠️ No token addresses configured for ${chain.name}`);
+      return chainPositions;
+    }
+
+    console.log(`[Yield] Tokens to check on ${chain.name}:`, Object.keys(tokens).join(', '));
+
+    // Try each RPC until one works
+    let successfulClient: ReturnType<typeof createPublicClient> | null = null;
+    let usedRpc = '';
+    for (let rpcIdx = 0; rpcIdx < chain.rpcs.length; rpcIdx++) {
+      try {
+        console.log(`[Yield] Trying RPC ${rpcIdx + 1}/${chain.rpcs.length} for ${chain.name}: ${chain.rpcs[rpcIdx]}`);
+        const client = getPublicClient(chain.id, isTestnet, rpcIdx);
+        // Test the RPC with a simple call
+        const blockNumber = await client.getBlockNumber();
+        successfulClient = client;
+        usedRpc = chain.rpcs[rpcIdx];
+        console.log(`[Yield] ✓ Connected to ${chain.name} via ${usedRpc} (block: ${blockNumber})`);
+        break;
+      } catch (error: any) {
+        console.warn(`[Yield] RPC ${chain.rpcs[rpcIdx]} failed for ${chain.name}:`, error?.message || 'Unknown error');
+      }
+    }
+
+    if (!successfulClient) {
+      console.error(`[Yield] ❌ All ${chain.rpcs.length} RPCs failed for ${chain.name}`);
+      return chainPositions;
+    }
+
     for (const [symbol, address] of Object.entries(tokens)) {
       try {
+        console.log(`[Yield] Checking ${symbol} (${address}) on ${chain.name}...`);
+
         // Get token balance
-        const balance = await client.readContract({
+        const balance = await successfulClient.readContract({
           address: address as Address,
           abi: erc20Abi,
           functionName: 'balanceOf',
           args: [walletAddress],
         });
-        
+
+        console.log(`[Yield] Raw balance for ${symbol} on ${chain.name}: ${balance.toString()}`);
+
         // Get token decimals
-        const decimals = await client.readContract({
+        const decimals = await successfulClient.readContract({
           address: address as Address,
           abi: erc20Abi,
           functionName: 'decimals',
         });
-        
+
         if (balance > 0n) {
           const balanceFormatted = formatUnits(balance, decimals);
-          
-          positions.push({
+          console.log(`[Yield] ✅ Found ${balanceFormatted} ${symbol} on ${chain.name} (decimals: ${decimals})`);
+
+          chainPositions.push({
             chainId: chain.id,
             chainName: chain.name,
             token: symbol,
@@ -192,34 +262,51 @@ export async function getWalletPositions(
             valueUsd: parseFloat(balanceFormatted) * (symbol.includes('USD') ? 1 : 2500), // Rough USD estimate
             currentApy: 0, // Will be enriched by yield data
           });
+        } else {
+          console.log(`[Yield] ⚪ ${symbol} on ${chain.name}: 0`);
         }
-      } catch (error) {
-        // Token might not exist on this chain, skip
-        console.debug(`Error fetching ${symbol} on ${chain.name}:`, error);
+      } catch (error: any) {
+        console.error(`[Yield] ❌ Error fetching ${symbol} on ${chain.name}:`, error?.message || error);
+        console.error(`[Yield] Token address was: ${address}`);
       }
     }
-    
+
     // Also check native ETH balance
     try {
-      const ethBalance = await client.getBalance({ address: walletAddress });
+      const ethBalance = await successfulClient.getBalance({ address: walletAddress });
       if (ethBalance > 0n) {
-        positions.push({
+        const formatted = formatUnits(ethBalance, 18);
+        console.log(`[Yield] ✅ Found ${formatted} ETH on ${chain.name}`);
+        chainPositions.push({
           chainId: chain.id,
           chainName: chain.name,
           token: 'ETH',
           tokenAddress: '0x0000000000000000000000000000000000000000' as Address,
           balance: ethBalance,
-          balanceFormatted: formatUnits(ethBalance, 18),
+          balanceFormatted: formatted,
           decimals: 18,
-          valueUsd: parseFloat(formatUnits(ethBalance, 18)) * 2500,
+          valueUsd: parseFloat(formatted) * 2500,
           currentApy: 0,
         });
       }
-    } catch (error) {
-      console.debug(`Error fetching ETH on ${chain.name}:`, error);
+    } catch (error: any) {
+      console.warn(`[Yield] ⚠️ Error fetching ETH on ${chain.name}:`, error?.message || error);
     }
-  }
-  
+
+    const elapsed = Date.now() - startTime;
+    console.log(`[Yield] ✓ Finished scanning ${chain.name} in ${elapsed}ms - found ${chainPositions.length} positions`);
+    return chainPositions;
+  });
+
+  // Wait for all chains to complete
+  const results = await Promise.all(chainPromises);
+  results.forEach(chainPositions => positions.push(...chainPositions));
+
+  console.log(`[Yield] 📊 Total positions found: ${positions.length}`);
+  positions.forEach(p => {
+    console.log(`[Yield]    • ${p.token} on ${p.chainName}: ${parseFloat(p.balanceFormatted).toFixed(4)}`);
+  });
+
   return positions;
 }
 
@@ -359,17 +446,20 @@ export async function executeYieldRotation(
   walletClient: any, // Wagmi wallet client
   onStatusUpdate?: (status: string) => void
 ): Promise<ExecutionResult> {
+  // Get wallet address from walletClient
+  const walletAddress = walletClient?.account?.address as Address;
+
   // Create pending transaction record
   const tx = transactionHistory.addTransaction({
-    walletAddress: plan.fromPosition.address as Address,
+    walletAddress: walletAddress,
     type: 'yield_rotation',
     status: 'pending',
     fromChainId: plan.fromPosition.chainId,
     fromChainName: plan.fromPosition.chainName,
     toChainId: plan.toOpportunity.chainId,
     toChainName: plan.toOpportunity.chainName,
-    fromToken: plan.fromPosition.symbol,
-    fromAmount: plan.fromPosition.balance.toFixed(4),
+    fromToken: plan.fromPosition.token,
+    fromAmount: plan.fromPosition.balanceFormatted,
     fromAmountUsd: plan.fromPosition.valueUsd,
     toToken: plan.toOpportunity.token,
     apyImprovement: plan.apyImprovement,
@@ -477,10 +567,18 @@ export async function findBestRotation(
   bestPlan: RotationPlan | null;
   allPlans: RotationPlan[];
 }> {
+  console.log(`[Yield] 🚀 Finding best yield rotation for wallet ${walletAddress.slice(0, 8)}...`);
+
   // Get wallet positions
   const positions = await getWalletPositions(walletAddress, isTestnet);
-  
+
+  console.log(`[Yield] 📊 Found ${positions.length} positions across chains:`);
+  positions.forEach(p => {
+    console.log(`[Yield]    • ${p.token} on ${p.chainName}: ${parseFloat(p.balanceFormatted).toFixed(4)}`);
+  });
+
   if (positions.length === 0) {
+    console.log('[Yield] ⚠️ No positions found in wallet');
     return {
       positions: [],
       opportunities: [],
@@ -488,36 +586,47 @@ export async function findBestRotation(
       allPlans: [],
     };
   }
-  
+
   // Get yield opportunities (mainnet only for now - DeFiLlama doesn't track testnet)
+  console.log('[Yield] 🔍 Fetching yield opportunities from DeFiLlama...');
   const opportunities = await fetchYieldOpportunities();
-  
+
+  // Log unique chains in opportunities
+  const uniqueChains = [...new Set(opportunities.map(o => o.chainName))];
+  console.log(`[Yield] 📈 Found ${opportunities.length} yield opportunities across ${uniqueChains.length} chains:`);
+  console.log(`[Yield]    Chains: ${uniqueChains.join(', ')}`);
+
   // Calculate rotation plans for each position
   const allPlans: RotationPlan[] = [];
-  
+
   for (const position of positions) {
     for (const opportunity of opportunities) {
       // Skip if same chain and same position type
-      if (position.chainId === opportunity.chainId && 
+      if (position.chainId === opportunity.chainId &&
           position.token.includes(opportunity.token.split('-')[0])) {
         continue;
       }
-      
+
       // Only consider opportunities with significant APY improvement
       if (opportunity.apy - position.currentApy < minApyImprovement) {
         continue;
       }
-      
+
       const plan = await calculateRotationPlan(position, opportunity, walletAddress);
       if (plan && plan.netBenefit > 0) {
         allPlans.push(plan);
       }
     }
   }
-  
+
   // Sort by net benefit
   allPlans.sort((a, b) => b.netBenefit - a.netBenefit);
-  
+
+  console.log(`[Yield] ✅ Generated ${allPlans.length} profitable rotation plans`);
+  if (allPlans[0]) {
+    console.log(`[Yield] 🏆 Best plan: ${allPlans[0].fromPosition.chainName} → ${allPlans[0].toOpportunity.chainName} (${allPlans[0].toOpportunity.protocol}) +${allPlans[0].apyImprovement.toFixed(2)}% APY`);
+  }
+
   return {
     positions,
     opportunities,

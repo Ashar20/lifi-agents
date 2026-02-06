@@ -9,8 +9,10 @@ const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
 const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
 // ===========================
-// SMART CACHING LAYER
+// LI.FI CACHING LAYER
 // ===========================
+// Caches DeFi quotes, route analysis, and AI responses to reduce API calls
+// and improve cross-chain routing performance.
 
 interface CacheEntry<T> {
   data: T;
@@ -18,9 +20,15 @@ interface CacheEntry<T> {
   expiresAt: number;
 }
 
-class SmartCache {
+class LifiCache {
   private prefix = 'lifi_cache_';
 
+  /**
+   * Cache DeFi data with TTL (default 5 minutes for quotes, 3 minutes for AI responses)
+   * @param key Cache key (e.g., 'quote_eth_arb_usdc_1000')
+   * @param data Data to cache (quotes, routes, AI responses)
+   * @param ttlSeconds Time-to-live in seconds
+   */
   set<T>(key: string, data: T, ttlSeconds: number = 300): void {
     try {
       const entry: CacheEntry<T> = {
@@ -30,10 +38,15 @@ class SmartCache {
       };
       localStorage.setItem(this.prefix + key, JSON.stringify(entry));
     } catch (e) {
-      console.warn('Cache write failed:', e);
+      console.warn('[LifiCache] Write failed (quota exceeded?):', e);
     }
   }
 
+  /**
+   * Retrieve cached DeFi data if still valid
+   * @param key Cache key
+   * @returns Cached data or null if expired/missing
+   */
   get<T>(key: string): T | null {
     try {
       const item = localStorage.getItem(this.prefix + key);
@@ -41,6 +54,7 @@ class SmartCache {
 
       const entry: CacheEntry<T> = JSON.parse(item);
       
+      // Check expiration
       if (Date.now() > entry.expiresAt) {
         this.delete(key);
         return null;
@@ -48,19 +62,25 @@ class SmartCache {
 
       return entry.data;
     } catch (e) {
-      console.warn('Cache read failed:', e);
+      console.warn('[LifiCache] Read failed:', e);
       return null;
     }
   }
 
+  /**
+   * Delete a specific cache entry
+   */
   delete(key: string): void {
     try {
       localStorage.removeItem(this.prefix + key);
     } catch (e) {
-      console.warn('Cache delete failed:', e);
+      console.warn('[LifiCache] Delete failed:', e);
     }
   }
 
+  /**
+   * Clear all LI.FI cache entries (useful for debugging or reset)
+   */
   clear(): void {
     try {
       const keys = Object.keys(localStorage);
@@ -70,33 +90,42 @@ class SmartCache {
         }
       });
     } catch (e) {
-      console.warn('Cache clear failed:', e);
+      console.warn('[LifiCache] Clear failed:', e);
     }
   }
 }
 
-const cache = new SmartCache();
+const cache = new LifiCache();
 
 // ===========================
-// API RATE LIMITER
+// API RATE LIMITER FOR LI.FI & GEMINI
 // ===========================
+// Prevents API quota exhaustion by limiting calls per time window.
+// Critical for Gemini AI (free tier: 15 RPM) and LI.FI API usage.
 
-class RateLimiter {
+class DeFiRateLimiter {
   private calls: Record<string, number[]> = {};
   private limits: Record<string, { maxCalls: number; windowMs: number }> = {
-    gemini: { maxCalls: 10, windowMs: 60000 } // 10 calls per minute
+    gemini: { maxCalls: 10, windowMs: 60000 }, // 10 calls per minute (conservative for free tier)
+    lifi: { maxCalls: 30, windowMs: 60000 },   // 30 LI.FI quotes per minute
   };
 
+  /**
+   * Check if we can make an API call without exceeding rate limits
+   * @param service Service name ('gemini' or 'lifi')
+   * @returns true if call is allowed
+   */
   canMakeCall(service: string): boolean {
     const now = Date.now();
     const limit = this.limits[service];
     
-    if (!limit) return true;
+    if (!limit) return true; // No limit defined
 
     if (!this.calls[service]) {
       this.calls[service] = [];
     }
 
+    // Remove calls outside the time window
     this.calls[service] = this.calls[service].filter(
       timestamp => now - timestamp < limit.windowMs
     );
@@ -104,6 +133,9 @@ class RateLimiter {
     return this.calls[service].length < limit.maxCalls;
   }
 
+  /**
+   * Record an API call (call this after successful API request)
+   */
   recordCall(service: string): void {
     const now = Date.now();
     if (!this.calls[service]) {
@@ -112,6 +144,9 @@ class RateLimiter {
     this.calls[service].push(now);
   }
 
+  /**
+   * Get remaining calls in current window
+   */
   getRemainingCalls(service: string): number {
     const limit = this.limits[service];
     if (!limit) return Infinity;
@@ -125,13 +160,31 @@ class RateLimiter {
 
     return Math.max(0, limit.maxCalls - recentCalls.length);
   }
+
+  /**
+   * Get time until rate limit resets (ms)
+   */
+  getTimeUntilReset(service: string): number {
+    const limit = this.limits[service];
+    if (!limit || !this.calls[service] || this.calls[service].length === 0) {
+      return 0;
+    }
+
+    const now = Date.now();
+    const oldestCall = Math.min(...this.calls[service]);
+    const resetTime = oldestCall + limit.windowMs;
+    
+    return Math.max(0, resetTime - now);
+  }
 }
 
-const rateLimiter = new RateLimiter();
+const rateLimiter = new DeFiRateLimiter();
 
 // ===========================
-// GEMINI AI SERVICE
+// GEMINI AI SERVICE FOR LI.FI AGENTS
 // ===========================
+// Powers intelligent DeFi strategy analysis, route decision-making,
+// and dynamic agent responses for cross-chain operations.
 
 export interface GeminiRequest {
   prompt: string;
@@ -146,6 +199,10 @@ export interface GeminiResponse {
 }
 
 export const geminiService = {
+  /**
+   * Chat with Gemini AI for DeFi strategy analysis
+   * Used by agents to analyze routes, arbitrage opportunities, and yield strategies
+   */
   async chat(request: GeminiRequest): Promise<GeminiResponse> {
     if (!GEMINI_API_KEY) {
       console.warn('Gemini API key not configured');
@@ -190,7 +247,10 @@ export const geminiService = {
     }
   },
 
-  // Generate agent dialogue for DeFi context
+  /**
+   * Generate dynamic agent dialogue for cross-chain DeFi operations
+   * Creates contextual responses based on agent role and current DeFi state
+   */
   async generateAgentDialogue(agentName: string, agentRole: string, context: string = ''): Promise<string> {
     if (!ai || !GEMINI_API_KEY) {
       // Fallback dialogues

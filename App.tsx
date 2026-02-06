@@ -683,8 +683,9 @@ const App: React.FC = () => {
             fromChain: 1, // Ethereum
             toChain: 42161, // Arbitrum
             fromToken: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC on Ethereum
-            toToken: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8', // USDC on Arbitrum
+            toToken: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', // Native USDC on Arbitrum
             fromAmount: '1000000000', // 1000 USDC
+            fromAddress: walletAddress, // Required for LI.FI quote
           });
 
           addLog(agent.name, `📈 Risk Score: ${riskAnalysis.riskScore}/100`);
