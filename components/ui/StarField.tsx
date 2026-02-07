@@ -65,7 +65,7 @@ const StarField: React.FC = () => {
                 const x = (star.x / star.z) * width + cx;
                 const y = (star.y / star.z) * height + cy;
 
-                const size = (1 - star.z / width) * 2; // Smaller size
+                const size = Math.max(0.5, (1 - star.z / width) * 2); // Smaller size, min 0.5 so radius is never negative
                 const px = (star.x / star.pz) * width + cx;
                 const py = (star.y / star.pz) * height + cy;
 

@@ -195,10 +195,10 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({ onLo
       <div className="p-4 border-b border-white/10 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-            isEnabled ? 'bg-orange-500/20' : 'bg-white/10'
+            isEnabled ? 'bg-spice-orange/20' : 'bg-white/10'
           }`}>
             {isEnabled ? (
-              <Bell className="text-orange-400" size={20} />
+              <Bell className="text-spice-orange" size={20} />
             ) : (
               <BellOff className="text-gray-400" size={20} />
             )}
@@ -252,11 +252,11 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({ onLo
           </p>
           <div className="flex gap-4 mt-3">
             <div className="flex items-center gap-2 text-sm text-gray-400">
-              <Mail size={14} className="text-orange-400" />
+              <Mail size={14} className="text-spice-orange" />
               Email
             </div>
             <div className="flex items-center gap-2 text-sm text-gray-400">
-              <Smartphone size={14} className="text-orange-400" />
+              <Smartphone size={14} className="text-spice-orange" />
               Push Notifications
             </div>
           </div>
@@ -293,7 +293,7 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({ onLo
           {pushPermission !== 'granted' && pushPermission !== 'denied' && (
             <button
               onClick={requestPushPermission}
-              className="px-3 py-1.5 bg-orange-500/20 text-orange-400 rounded text-sm hover:bg-orange-500/30 transition-colors"
+              className="px-3 py-1.5 bg-spice-orange/20 text-spice-orange rounded text-sm hover:bg-spice-orange/30 transition-colors"
             >
               Enable
             </button>
@@ -381,7 +381,7 @@ export const NotificationSettings: React.FC<NotificationSettingsProps> = ({ onLo
             className={`flex-1 py-3 px-4 rounded-lg font-bold transition-colors flex items-center justify-center gap-2 ${
               isEnabled
                 ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                : 'bg-orange-500 text-black hover:bg-orange-500/80'
+                : 'bg-spice-orange text-black hover:bg-spice-orange/80'
             } disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             {isLoading ? (

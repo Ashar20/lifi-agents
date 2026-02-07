@@ -45,11 +45,19 @@ export const IntentChat: React.FC<IntentChatProps> = ({
   const exampleIntents = [
     "Make best use of 1 USDC from my wallet",
     "Put my USDC where it earns the most",
+    "Deposit my USDC into Aave on Arbitrum",
+    "Hedge my ETH exposure",
+    "Deposit 100 USDC in 3 steps over 2 weeks",
     "Swap 100 USDC from Ethereum to Arbitrum",
     "Find me arbitrage opportunities across chains",
     "Rebalance my portfolio to match my targets",
     "Bridge my USDC to Polygon for higher yield"
   ];
+
+  const typed = input.trim().toLowerCase();
+  const suggestedIntents = typed.length > 0
+    ? exampleIntents.filter(ex => ex.toLowerCase().includes(typed))
+    : [];
 
   return (
     <div className="h-full flex flex-col bg-transparent">
@@ -62,10 +70,10 @@ export const IntentChat: React.FC<IntentChatProps> = ({
           </h2>
         </div>
         <p className="text-gray-400 text-xs font-mono">
-          Be specific - e.g. &quot;Swap 100 USDC from Ethereum to Arbitrum&quot; or &quot;Put my USDC where it earns the most&quot;
+          Type your intent—suggestions appear as you type
         </p>
         {/* Wallet Status */}
-        <div className={`mt-2 flex items-center gap-2 text-xs font-mono ${isConnected ? 'text-neon-green' : 'text-orange-400'}`}>
+        <div className={`mt-2 flex items-center gap-2 text-xs font-mono ${isConnected ? 'text-neon-green' : 'text-spice-orange'}`}>
           {isConnected ? (
             <>
               <Wallet className="w-3 h-3" />
@@ -84,28 +92,11 @@ export const IntentChat: React.FC<IntentChatProps> = ({
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.length === 0 ? (
-          <div className="space-y-3">
-            <div className="text-center py-8">
-              <Bot className="w-12 h-12 text-neon-green/50 mx-auto mb-3" />
-              <p className="text-gray-500 text-sm font-mono mb-4">
-                What do you want to do with your funds?
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-xs text-gray-500 font-mono uppercase tracking-wider mb-2">
-                Example Intents:
-              </p>
-              {exampleIntents.map((example, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setInput(example)}
-                  className="w-full text-left p-3 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-neon-green/30 rounded-lg transition-all text-xs text-gray-300 font-mono"
-                >
-                  "{example}"
-                </button>
-              ))}
-            </div>
+          <div className="text-center py-8">
+            <Bot className="w-12 h-12 text-neon-green/50 mx-auto mb-3" />
+            <p className="text-gray-500 text-sm font-mono">
+              What do you want to do with your funds?
+            </p>
           </div>
         ) : (
           <>
@@ -169,14 +160,14 @@ export const IntentChat: React.FC<IntentChatProps> = ({
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSubmit} className="p-4 border-t border-white/10">
+      <form onSubmit={handleSubmit} className="p-4 border-t border-white/10 relative">
         <div className="flex gap-2">
           <input
             ref={inputRef}
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="e.g. Make best use of 1 USDC from my wallet..."
+            placeholder="Type your intent..."
             disabled={isProcessing}
             className="flex-1 px-4 py-2 bg-black/40 border border-white/10 rounded-lg text-white placeholder-gray-600 focus:border-neon-green/50 focus:bg-black/60 focus:outline-none font-mono text-sm disabled:opacity-50 transition-all"
           />
@@ -188,9 +179,23 @@ export const IntentChat: React.FC<IntentChatProps> = ({
             <Send className="w-4 h-4" />
           </button>
         </div>
-        <p className="text-[10px] text-gray-500 mt-2 font-mono">
-          Just type naturally - we'll figure it out
-        </p>
+        {suggestedIntents.length > 0 && (
+          <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+            {suggestedIntents.slice(0, 5).map((suggestion, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => {
+                  setInput(suggestion);
+                  inputRef.current?.focus();
+                }}
+                className="w-full text-left px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-neon-green/30 rounded text-xs text-gray-300 font-mono transition-all"
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        )}
       </form>
     </div>
   );

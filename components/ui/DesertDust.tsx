@@ -49,7 +49,7 @@ const DesertDust: React.FC = () => {
             // Desert gradient background
             const gradient = ctx.createLinearGradient(0, 0, 0, height);
             gradient.addColorStop(0, '#1A1410'); // stillsuit-black
-            gradient.addColorStop(1, '#4E342E'); // arrakis-brown
+            gradient.addColorStop(1, '#0f172a'); // slate-900
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, width, height);
 
@@ -67,16 +67,16 @@ const DesertDust: React.FC = () => {
                     particle.x = Math.random() * width;
                 }
 
-                // Draw dust particle with spice orange tint
+                // Draw dust particle with neon green tint
                 ctx.beginPath();
                 ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(216, 67, 21, ${particle.opacity})`; // spice-orange
+                ctx.fillStyle = `rgba(67, 255, 77, ${particle.opacity})`; // neon green
                 ctx.fill();
 
                 // Add slight glow
                 ctx.beginPath();
                 ctx.arc(particle.x, particle.y, particle.size * 2, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(215, 204, 200, ${particle.opacity * 0.2})`; // desert-sand glow
+                ctx.fillStyle = `rgba(148, 163, 184, ${particle.opacity * 0.2})`; // slate-400 glow
                 ctx.fill();
             });
 

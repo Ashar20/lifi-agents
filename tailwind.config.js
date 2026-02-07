@@ -2,22 +2,24 @@
 export default {
   content: [
     "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
     "./components/**/*.{js,ts,jsx,tsx}",
     "./App.tsx",
     "./index.tsx",
+    "./providers/**/*.{js,ts,jsx,tsx}",
+    "./hooks/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {
       colors: {
-        // Dune Theme Colors
-        'spice-orange': '#D84315',
-        'desert-sand': '#D7CCC8',
-        'deep-sand': '#8D6E63',
-        'arrakis-brown': '#4E342E',
-        'stillsuit-black': '#1A1410',
-        'fremen-blue': '#0277BD',
-        'sandworm-tan': '#A1887F',
+        // Neon / Cyber Theme
+        'spice-orange': '#43FF4D',
+        'neon-green': '#43FF4D',
+        'desert-sand': '#94a3b8',
+        'deep-sand': '#64748b',
+        'arrakis-brown': '#0f172a',
+        'stillsuit-black': '#020617',
+        'fremen-blue': '#06b6d4',
+        'sandworm-tan': '#64748b',
       },
       fontFamily: {
         mono: ['Rajdhani', 'monospace'],
@@ -47,8 +49,8 @@ export default {
       },
       backgroundImage: {
         'grid-pattern': "linear-gradient(to right, #1f2937 1px, transparent 1px), linear-gradient(to bottom, #1f2937 1px, transparent 1px)",
-        'dune-gradient': 'linear-gradient(135deg, #D84315 0%, #8D6E63 100%)',
-        'desert-gradient': 'linear-gradient(180deg, #1A1410 0%, #4E342E 100%)',
+        'dune-gradient': 'linear-gradient(135deg, #43FF4D 0%, #06b6d4 100%)',
+        'desert-gradient': 'linear-gradient(180deg, #020617 0%, #0f172a 100%)',
       },
     },
   },

@@ -4,12 +4,22 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { lifiService } from './lifi';
+import { getPortfolioSummary } from './portfolioTracker';
 import {
   getBestYieldOpportunities,
   getYieldComparison,
   type YieldOpportunity,
 } from './yieldFetcher';
 import { oneClickYieldRotation } from './yieldRotation';
+import { getCrossChainVaultDepositQuote } from './crossChainVaultDeposit';
+import { executeAaveBorrow } from './aaveBorrow';
+import { getHedgeQuote, executeHedge } from './hedgeStrategy';
+import {
+  createStagedDepositPlan,
+  getStagedStrategy,
+  getNextPendingStep,
+  completeStagedStep,
+} from './stagedStrategy';
 
 // Chain name → chain ID
 const CHAIN_IDS: Record<string, number> = {
@@ -84,15 +94,121 @@ export interface AgentContext {
   walletClient?: any;
   onDeployAgents?: () => void;
   onRunAgentPipeline?: (intentType: string, userMessage?: string) => Promise<{ success: boolean; summary: string; agentOutputs: Record<string, string> }>;
+  onSwapExecuted?: (txHash: string, summary: string) => void;
 }
 
 export function createAgentTools(context: AgentContext) {
-  const { walletAddress, walletClient, onDeployAgents, onRunAgentPipeline } = context;
+  const { walletAddress, walletClient, onDeployAgents, onRunAgentPipeline, onSwapExecuted } = context;
 
   return {
+    getWalletBalances: tool({
+      description:
+        'Get ALL token balances across chains: ETH, MATIC, AVAX (native), USDC, USDT, DAI, WETH. Use this FIRST when user asks about balance, funds, wallet, or before suggesting swaps/yields. Prefer over getUSDCBalances—execution fails if we only report USDC when user has other tokens.',
+      inputSchema: z.object({
+        address: z
+          .string()
+          .optional()
+          .describe('Wallet address. If omitted, uses the tracked/connected wallet.'),
+      }),
+      execute: async ({ address }) => {
+        const addr = (address || walletAddress || '').trim();
+        if (!addr || !addr.startsWith('0x')) {
+          return { error: 'No wallet address available. Connect a wallet or enter an address to check.' };
+        }
+        try {
+          let portfolio = await getPortfolioSummary(addr, [1, 42161, 10, 137, 8453, 43114]);
+          // Supplement: if Ethereum missing from portfolio, add from LI.FI (more reliable RPC fallbacks)
+          const hasEthereum = portfolio.positions.some((p) => p.chainName === 'Ethereum' || (p as any).chainId === 1);
+          if (!hasEthereum) {
+            const [usdcBalances, ethNative] = await Promise.all([
+              lifiService.getUSDCBalances(addr),
+              lifiService.getNativeBalance(addr, 1),
+            ]);
+            const ethUsdc = usdcBalances.find((b) => b.chainId === 1);
+            const newPositions = [...portfolio.positions];
+            if (ethUsdc && ethUsdc.balanceFormatted > 0) {
+              newPositions.push({ chainName: 'Ethereum', tokenSymbol: 'USDC', balance: ethUsdc.balanceFormatted, valueUSD: ethUsdc.valueUSD } as any);
+            }
+            if (ethNative.balanceFormatted > 0) {
+              newPositions.push({ chainName: 'Ethereum', tokenSymbol: 'ETH', balance: ethNative.balanceFormatted, valueUSD: ethNative.balanceFormatted * 2500 } as any);
+            }
+            if (newPositions.length > portfolio.positions.length) {
+              portfolio = {
+                ...portfolio,
+                positions: newPositions,
+                totalValueUSD: newPositions.reduce((s, p) => s + p.valueUSD, 0),
+                tokenCount: newPositions.length,
+                chains: [...new Set([...portfolio.chains, 'Ethereum'])],
+              };
+            }
+          }
+          // Fallback: if portfolio still empty, use LI.FI USDC + native balance for all chains
+          if (portfolio.positions.length === 0) {
+            console.log('[AgentTools] Primary portfolio empty, using LI.FI fallback...');
+            const chainNames: Record<number, string> = { 1: 'Ethereum', 42161: 'Arbitrum', 10: 'Optimism', 137: 'Polygon', 8453: 'Base', 43114: 'Avalanche' };
+            const chainIds = [1, 42161, 10, 137, 8453, 43114];
+            const positions: { chainName: string; tokenSymbol: string; balance: number; valueUSD: number }[] = [];
+            let totalValueUSD = 0;
+
+            // Fetch USDC and native balances in parallel for speed
+            const [usdcBalances, ...nativeResults] = await Promise.all([
+              lifiService.getUSDCBalances(addr),
+              ...chainIds.map((chainId) => lifiService.getNativeBalance(addr, chainId).then((r) => ({ chainId, ...r }))),
+            ]);
+
+            for (const b of usdcBalances) {
+              positions.push({ chainName: b.chainName, tokenSymbol: 'USDC', balance: b.balanceFormatted, valueUSD: b.valueUSD });
+              totalValueUSD += b.valueUSD;
+            }
+
+            for (const native of nativeResults) {
+              if (native.balanceFormatted > 0) {
+                const chainName = chainNames[native.chainId] || `Chain ${native.chainId}`;
+                const symbol = native.chainId === 137 ? 'MATIC' : native.chainId === 43114 ? 'AVAX' : 'ETH';
+                const priceUSD = symbol === 'ETH' ? 2500 : symbol === 'MATIC' ? 0.8 : 35;
+                const valueUSD = native.balanceFormatted * priceUSD;
+                positions.push({ chainName, tokenSymbol: symbol, balance: native.balanceFormatted, valueUSD });
+                totalValueUSD += valueUSD;
+              }
+            }
+
+            console.log(`[AgentTools] LI.FI fallback found ${positions.length} positions, total $${totalValueUSD.toFixed(2)}`);
+            portfolio = { totalValueUSD, positions, chains: [...new Set(positions.map((p) => p.chainName))], tokenCount: positions.length, lastUpdated: Date.now() };
+          }
+          const byChain: Record<string, string> = {};
+          portfolio.positions.forEach((p) => {
+            const key = `${p.chainName}`;
+            if (!byChain[key]) byChain[key] = '';
+            byChain[key] += (byChain[key] ? '; ' : '') + `${p.balance.toFixed(4)} ${p.tokenSymbol}`;
+          });
+          return {
+            wallet: addr.slice(0, 6) + '...' + addr.slice(-4),
+            totalValueUSD: portfolio.totalValueUSD.toFixed(2),
+            byChain: Object.entries(byChain).map(([chain, tokens]) => ({ chain, tokens })),
+            byToken: Object.entries(
+              portfolio.positions.reduce((acc, p) => {
+                acc[p.tokenSymbol] = (acc[p.tokenSymbol] || 0) + p.balance;
+                return acc;
+              }, {} as Record<string, number>)
+            ).map(([token, bal]) => ({ token, balance: bal.toFixed(4) })),
+            positions: portfolio.positions.map((p) => ({
+              chain: p.chainName,
+              token: p.tokenSymbol,
+              balance: p.balance.toFixed(4),
+              valueUSD: p.valueUSD.toFixed(2),
+            })),
+            hasBalance: portfolio.positions.length > 0,
+          };
+        } catch (err: any) {
+          const msg = err?.message || err?.cause?.message || 'Failed to fetch balances';
+          return { error: `${msg}. RPC or API may be temporarily unavailable—try again.` };
+        }
+      },
+    }),
+
     getUSDCBalances: tool({
       description:
-        'Get USDC balance across all supported chains (Ethereum, Arbitrum, Optimism, Polygon, Base, Avalanche) for a wallet. Use this to check what the user has before suggesting swaps or yields.',
+        'Get USDC balance only across chains. Use getWalletBalances instead when user asks about balance/funds—that returns all tokens (ETH, USDC, USDT, DAI, WETH) and prevents execution failures.',
       inputSchema: z.object({
         address: z
           .string()
@@ -195,23 +311,74 @@ export function createAgentTools(context: AgentContext) {
             message: `Quote: ${amount} ${fromToken} on ${fromChain} → ~${toAmountFormatted} ${toToken} on ${toChain}${arcNote}`,
           };
         } catch (err: any) {
-          const msg = err?.message || err?.cause?.message || 'Failed to get quote';
-          const isUsdcToUsdc = fromToken.toUpperCase() === 'USDC' && toToken.toUpperCase() === 'USDC';
-          const hint =
-            isUsdcToUsdc && amountNum < 25
-              ? ' USDC bridges (Arc/CCTP, Stargate) often need 10–25+ USDC. Try a larger amount.'
-              : '';
           return {
-            error: `${msg}${hint}`,
+            error: err?.message || err?.cause?.message || 'Failed to get quote',
             routeFound: false,
           };
         }
       },
     }),
 
+    executeSwap: tool({
+      description:
+        'EXECUTE a swap/bridge when the user has CONFIRMED (e.g. "yes", "proceed", "do it", "execute"). Use the SAME params you used in getSwapQuote. Requires wallet to be connected. Call this immediately when user says yes to a swap—do not ask again.',
+      inputSchema: z.object({
+        fromChain: z.string().describe('Source chain (e.g. Ethereum, Polygon)'),
+        toChain: z.string().describe('Destination chain'),
+        fromToken: z.string().describe('Source token: USDC, ETH, WETH, USDT, or DAI'),
+        toToken: z.string().describe('Destination token'),
+        amount: z.string().describe('Amount in human units (e.g. 1.57 for 1.57 USDC)'),
+        toAddress: z.string().optional().describe('Recipient address. Defaults to sender.'),
+      }),
+      execute: async ({ fromChain, toChain, fromToken, toToken, amount, toAddress }) => {
+        if (!walletClient) {
+          return { success: false, error: 'Wallet not connected. Connect MetaMask to execute the swap.' };
+        }
+        const fromChainId = resolveChainId(fromChain);
+        const toChainId = resolveChainId(toChain);
+        const fromInfo = getTokenInfo(fromToken, fromChainId);
+        const toInfo = getTokenInfo(toToken, toChainId);
+        if (!fromInfo || !toInfo) {
+          return { success: false, error: 'Unsupported token or chain.' };
+        }
+        const amountNum = parseFloat(amount);
+        const amountRaw = Math.floor(amountNum * Math.pow(10, fromInfo.decimals)).toString();
+        if (amountRaw === '0') {
+          return { success: false, error: 'Amount must be greater than 0.' };
+        }
+        try {
+          const quote = await lifiService.getQuote({
+            fromChain: fromChainId,
+            toChain: toChainId,
+            fromToken: fromInfo.address,
+            toToken: toInfo.address,
+            fromAmount: amountRaw,
+            fromAddress: walletAddress,
+            toAddress: toAddress || walletAddress,
+          });
+          if (!quote) {
+            return { success: false, error: 'No route found. The quote may have expired.' };
+          }
+          const result = await lifiService.executeRoute(quote, walletClient);
+          const txHash = result?.transactionHash || result?.hash || 'pending';
+          const summary = `Swapped ${amount} ${fromToken} on ${fromChain} → ${toToken} on ${toChain}`;
+          onSwapExecuted?.(txHash, summary);
+          return {
+            success: true,
+            txHash,
+            summary,
+            message: `✅ Swap executed! TX: ${String(txHash).slice(0, 10)}...`,
+          };
+        } catch (err: any) {
+          const msg = err?.message || err?.cause?.message || 'Execution failed';
+          return { success: false, error: msg };
+        }
+      },
+    }),
+
     getBestYields: tool({
       description:
-        'Find the best yield opportunities (APY) for a token across DeFi protocols. Use when the user asks about yields, "put my USDC where it earns", or "best use of my funds".',
+        'Low-level yield data. Do NOT use for "best yield" or "where to put funds" questions—use runAgentPipeline instead so the agent orchestration decides. Only use getBestYields when user explicitly asks for raw API data or a quick check.',
       inputSchema: z.object({
         token: z.string().default('USDC').describe('Token symbol to search yields for'),
         chainFilter: z
@@ -235,21 +402,199 @@ export function createAgentTools(context: AgentContext) {
           opportunities: top.map((o: YieldOpportunity) => ({
             protocol: o.protocol,
             chain: o.chainName,
-            apy: (o.apy * 100).toFixed(2) + '%',
+            apy: o.apy.toFixed(2) + '%',
             tvl: `$${(o.tvl / 1e6).toFixed(2)}M`,
             type: o.type,
             risk: o.risk,
           })),
-          bestApy: top[0]
-            ? (top[0].apy * 100).toFixed(2) + '%'
-            : null,
+          bestApy: top[0] ? top[0].apy.toFixed(2) + '%' : null,
+        };
+      },
+    }),
+
+    getCrossChainVaultDepositQuote: tool({
+      description:
+        'Get a quote for cross-chain deposit into Aave V3 on Arbitrum. Bridge USDC from any chain + supply to Aave in one transaction. Use when user wants to "deposit into Aave", "put USDC in Aave", or similar.',
+      inputSchema: z.object({
+        fromChain: z
+          .string()
+          .describe('Source chain: Ethereum, Arbitrum, Optimism, Polygon, Base, or Avalanche'),
+        amount: z.string().describe('Amount in human units (e.g. 100 for 100 USDC)'),
+      }),
+      execute: async ({ fromChain, amount }) => {
+        const fromChainId = resolveChainId(fromChain);
+        const amountNum = parseFloat(amount);
+        const amountRaw = Math.floor(amountNum * 1e6).toString();
+        if (amountRaw === '0') {
+          return { error: 'Amount must be greater than 0.' };
+        }
+        // Cross-chain bridge + Aave deposit need ~10+ USDC minimum (bridge limits)
+        if (amountNum < 10) {
+          return {
+            error: `Cross-chain deposit into Aave needs at least 10 USDC. Bridges and the deposit flow have minimum requirements—${amountNum} USDC is too small. Try 10 or more USDC.`,
+            routeFound: false,
+          };
+        }
+        const addr = (walletAddress || '').trim();
+        if (!addr || !addr.startsWith('0x')) {
+          return { error: 'No wallet address. Connect a wallet to get a vault deposit quote.' };
+        }
+        try {
+          const result = await getCrossChainVaultDepositQuote({
+            fromChainId,
+            fromAmount: amountRaw,
+            fromAddress: addr,
+          });
+          if (!result) {
+            return {
+              error: 'No quote available for cross-chain Aave deposit. Try a different chain or amount (e.g. 10+ USDC).',
+              routeFound: false,
+            };
+          }
+          return {
+            summary: result.summary,
+            routeFound: true,
+            message: result.summary,
+          };
+        } catch (err: any) {
+          return {
+            error: err?.message || 'Failed to get vault deposit quote',
+            routeFound: false,
+          };
+        }
+      },
+    }),
+
+    aaveBorrow: tool({
+      description:
+        'Borrow against Aave collateral for leverage. User must have supplied collateral (e.g. USDC) to Aave on Arbitrum first. Use when user says "borrow", "leverage", "borrow against my collateral".',
+      inputSchema: z.object({
+        chain: z.string().default('Arbitrum').describe('Chain (Arbitrum supported)'),
+        borrowAsset: z.string().describe('Asset to borrow: USDC, WETH, USDT, or DAI'),
+        amount: z.string().describe('Amount in human units (e.g. 100 for 100 USDC)'),
+      }),
+      execute: async ({ chain, borrowAsset, amount }) => {
+        const chainId = resolveChainId(chain);
+        if (chainId !== 42161) {
+          return { error: 'Aave borrow only supported on Arbitrum. User must be on Arbitrum.' };
+        }
+        const decimals = borrowAsset.toUpperCase() === 'WETH' || borrowAsset.toUpperCase() === 'ETH' ? 18 : 6;
+        const amountRaw = Math.floor(parseFloat(amount) * Math.pow(10, decimals)).toString();
+        if (!walletClient) {
+          return { error: 'Connect wallet to borrow. User must be on Arbitrum.' };
+        }
+        const result = await executeAaveBorrow(
+          { chainId, borrowAsset, amount: amountRaw, onBehalfOf: walletAddress },
+          walletClient
+        );
+        if (result.success) {
+          return { success: true, txHash: result.txHash, message: `Borrowed ${amount} ${borrowAsset} on Arbitrum. TX: ${result.txHash?.slice(0, 10)}...` };
+        }
+        return { error: result.error };
+      },
+    }),
+
+    hedgeEthExposure: tool({
+      description:
+        'Hedge ETH exposure by swapping ETH to USDC—reduces volatility risk. Use when user says "hedge my ETH", "reduce ETH exposure", "hedge against ETH drop". Get quote first, then execute when user confirms.',
+      inputSchema: z.object({
+        action: z.enum(['quote', 'execute']).describe('quote = get estimate, execute = perform swap'),
+        chain: z.string().describe('Chain: Ethereum, Arbitrum, Optimism, Polygon, Base, or Avalanche'),
+        ethAmount: z.string().describe('ETH amount to hedge (e.g. 0.5 for half an ETH)'),
+      }),
+      execute: async ({ action, chain, ethAmount }) => {
+        const chainId = resolveChainId(chain);
+        if (action === 'quote') {
+          const result = await getHedgeQuote(chain, ethAmount, walletAddress);
+          if ('error' in result) return { error: result.error };
+          return result;
+        }
+        if (!walletClient) return { error: 'Connect wallet to execute hedge.' };
+        const result = await executeHedge(chain, ethAmount, walletAddress, walletClient);
+        if (result.success) {
+          onSwapExecuted?.(result.txHash || '', `Hedged ${ethAmount} ETH → USDC on ${chain}`);
+          return { success: true, txHash: result.txHash, message: `Hedge executed. TX: ${result.txHash?.slice(0, 10)}...` };
+        }
+        return { error: result.error };
+      },
+    }),
+
+    createStagedStrategy: tool({
+      description:
+        'Create a staged deposit plan (DCA). e.g. "deposit 100 USDC in 3 steps over 2 weeks". Returns a plan; user executes each step when ready.',
+      inputSchema: z.object({
+        totalAmount: z.string().describe('Total amount (e.g. 100 for 100 USDC)'),
+        stepsCount: z.number().describe('Number of steps (e.g. 3)'),
+        totalDays: z.number().describe('Span in days (e.g. 14 for 2 weeks)'),
+        token: z.string().default('USDC').describe('Token symbol'),
+      }),
+      execute: async ({ totalAmount, stepsCount, totalDays, token }) => {
+        const strategy = createStagedDepositPlan(totalAmount, stepsCount, totalDays, token);
+        const stepsDesc = strategy.steps.map(s => `Step ${s.stepNumber}: ${s.amountFormatted} ${token} (${s.dueDate})`).join('\n');
+        return {
+          success: true,
+          strategyId: strategy.id,
+          message: `Created ${stepsCount}-step plan: ${totalAmount} ${token} over ${totalDays} days.\n${stepsDesc}\n\nSay "execute step 1" when ready to run the first deposit.`,
+          steps: strategy.steps,
+        };
+      },
+    }),
+
+    executeStagedStep: tool({
+      description:
+        'Execute the next pending step of a staged strategy. Use when user says "execute step 1", "do the next step", "run step 2".',
+      inputSchema: z.object({
+        stepNumber: z.number().optional().describe('Step to execute (1-based). If omitted, executes next pending.'),
+      }),
+      execute: async ({ stepNumber }) => {
+        const strategy = getStagedStrategy();
+        if (!strategy) return { error: 'No staged strategy. Create one first with createStagedStrategy.' };
+        const step = stepNumber
+          ? strategy.steps.find(s => s.stepNumber === stepNumber)
+          : getNextPendingStep();
+        if (!step || step.status !== 'pending') {
+          return { error: stepNumber ? `Step ${stepNumber} not found or already done.` : 'No pending steps.' };
+        }
+        if (!walletClient) return { error: 'Connect wallet to execute.' };
+        const chainId = 42161;
+        const { getCrossChainVaultDepositQuote } = await import('./crossChainVaultDeposit');
+        const fromChainId = walletClient.chain?.id || 1;
+        const result = await getCrossChainVaultDepositQuote({
+          fromChainId,
+          fromAmount: step.amount,
+          fromAddress: walletAddress,
+        });
+        if (!result) {
+          return { error: `No route for step ${step.stepNumber}. Try deposit into Aave directly.` };
+        }
+        const execResult = await lifiService.executeRoute(result.quote, walletClient);
+        const txHash = execResult?.transactionHash || execResult?.hash;
+        completeStagedStep(step.stepNumber, txHash);
+        return {
+          success: true,
+          txHash,
+          message: `Step ${step.stepNumber} done: ${step.amountFormatted} ${strategy.token}. TX: ${txHash?.slice(0, 10)}...`,
+        };
+      },
+    }),
+
+    getPerpsInfo: tool({
+      description:
+        'Get info about perpetuals/shorting for hedging. Use when user asks about "shorting", "perps", "perpetuals", "hedge with short". Returns guidance—actual perps trading requires Hyperliquid app.',
+      inputSchema: z.object({
+        asset: z.string().optional().default('ETH').describe('Asset user wants to short or hedge'),
+      }),
+      execute: async ({ asset }) => {
+        return {
+          message: `To short or hedge ${asset} with perpetuals: Use Hyperliquid (app.hyperliquid.xyz) or GMX. Connect your wallet there to open short positions. This app handles swaps, yield, and Aave—for perps you'll need to use a dedicated perps platform. I can help you hedge by swapping ${asset} to USDC instead—say "hedge my ETH" to reduce exposure.`,
+          alternatives: ['hedgeEthExposure: Swap ETH to USDC to reduce volatility risk', 'Aave borrow: Borrow against collateral for leverage'],
         };
       },
     }),
 
     getYieldComparison: tool({
       description:
-        'Compare yields for a token across chains and protocols. Returns average APY and best opportunity. Use for "where should I put my USDC" type questions.',
+        'Low-level yield comparison. Do NOT use for yield questions—use runAgentPipeline with intentType yield_optimization so the agent orchestration decides. Only use when user explicitly asks for raw yield comparison data.',
       inputSchema: z.object({
         token: z.string().default('USDC').describe('Token symbol'),
       }),
@@ -257,12 +602,12 @@ export function createAgentTools(context: AgentContext) {
         const result = await getYieldComparison(token);
         return {
           token: result.token,
-          averageApy: (result.averageApy * 100).toFixed(2) + '%',
+          averageApy: result.averageApy.toFixed(2) + '%',
           bestOpportunity: result.bestOpportunity
             ? {
                 protocol: result.bestOpportunity.protocol,
                 chain: result.bestOpportunity.chainName,
-                apy: (result.bestOpportunity.apy * 100).toFixed(2) + '%',
+                apy: result.bestOpportunity.apy.toFixed(2) + '%',
                 tvl: `$${(result.bestOpportunity.tvl / 1e6).toFixed(2)}M`,
               }
             : null,
@@ -289,8 +634,8 @@ export function createAgentTools(context: AgentContext) {
         'Run the 7 agents directly on the user request. Each agent (Chani, Irulan, Liet-Kynes, Duncan Idaho, Thufir Hawat, Stilgar) performs their job (arbitrage, portfolio, yield, risk, rebalancing, execution). Use when user asks for yield, arbitrage, portfolio check, rebalancing, or "make best use of" - AFTER deployAgents. Pass the user message to determine intent.',
       inputSchema: z.object({
         intentType: z
-          .enum(['yield_optimization', 'arbitrage', 'rebalancing', 'portfolio_check', 'swap', 'monitoring', 'general'])
-          .describe('Intent: yield_optimization, arbitrage, rebalancing, portfolio_check, swap, monitoring, or general'),
+          .enum(['yield_optimization', 'arbitrage', 'rebalancing', 'portfolio_check', 'swap', 'vault_deposit', 'hedge', 'borrow', 'staged_strategy', 'monitoring', 'general'])
+          .describe('Intent: yield_optimization, arbitrage, rebalancing, portfolio_check, swap, vault_deposit, hedge, borrow, staged_strategy, monitoring, or general'),
         userMessage: z.string().optional().describe('The user message (e.g. "find best yield for my USDC") to parse intent from'),
       }),
       execute: async ({ intentType, userMessage }) => {

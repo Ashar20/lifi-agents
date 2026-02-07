@@ -144,7 +144,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLaunchApp }) => {
               <p className="text-sm text-gray-400 leading-relaxed">Automated risk analysis and bridge security validation.</p>
             </SpotlightCard>
             <SpotlightCard className="p-6 group h-full">
-              <Cpu className="text-orange-400 mb-4 group-hover:scale-110 transition-transform duration-300" size={32} />
+              <Cpu className="text-spice-orange mb-4 group-hover:scale-110 transition-transform duration-300" size={32} />
               <h3 className="text-lg font-bold font-mono text-white mb-2">AI Core</h3>
               <p className="text-sm text-gray-400 leading-relaxed">Powered by Gemini for advanced reasoning and strategy.</p>
             </SpotlightCard>

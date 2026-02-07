@@ -56,7 +56,7 @@ const App: React.FC = () => {
   }, [isConnected, connectedAddress]);
 
   const [showLanding, setShowLanding] = useState<boolean>(true);
-  const [rightPanelView, setRightPanelView] = useState<'chat' | 'operations' | 'yield' | 'arbitrage' | 'alerts' | 'history' | 'wallets' | 'registry'>('chat');
+  const [rightPanelView, setRightPanelView] = useState<'chat' | 'yield' | 'arbitrage' | 'alerts' | 'history' | 'wallets' | 'registry'>('chat');
 
   // --- State ---
   const [activeAgents, setActiveAgents] = useState<string[]>(() => {
@@ -115,11 +115,12 @@ const App: React.FC = () => {
 
   // --- Execution State ---
   const [pendingExecution, setPendingExecution] = useState<{
-    type: 'yield' | 'arbitrage' | 'swap' | 'rebalance';
-    quote: any;
+    type: 'yield' | 'arbitrage' | 'swap' | 'rebalance' | 'vault_deposit' | 'direct_aave';
+    quote?: any;
     summary: string;
     estimatedOutput: string;
     gasCost: string;
+    directAaveParams?: { chainId: number; usdcAddress: string; amountRaw: string; fromAddress: string };
   } | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
 
@@ -368,7 +369,11 @@ const App: React.FC = () => {
   }, [addLog]);
 
   // Execute agent task (AI-powered)
-  const executeAgentTask = useCallback(async (agentId: string, taskDescription?: string) => {
+  const executeAgentTask = useCallback(async (
+    agentId: string,
+    taskDescription?: string,
+    context?: { intentType?: string; previousResults?: Record<string, any> }
+  ) => {
     const agent = AGENTS.find(a => a.id === agentId);
     if (!agent) return;
 
@@ -631,60 +636,157 @@ const App: React.FC = () => {
           summary = `Rebalancing analysis failed: ${error.message}`;
         }
       } else if (agent.role === 'Merchant') {
-        // Yield Seeker - Real yield optimization with detailed logs
+        // Yield Seeker - Real yield optimization with gas validation
         addLog(agent.name, '🔍 Starting yield hunt...');
         await new Promise(r => setTimeout(r, 200));
-        addLog(agent.name, '📡 Scanning Aave protocol...');
-        await new Promise(r => setTimeout(r, 200));
-        addLog(agent.name, '📡 Scanning Compound protocol...');
-        await new Promise(r => setTimeout(r, 200));
-        addLog(agent.name, '📡 Scanning Stargate protocol...');
-        await new Promise(r => setTimeout(r, 200));
-        addLog(agent.name, '📡 Scanning GMX/GLP vaults...');
-        await new Promise(r => setTimeout(r, 300));
 
         try {
+          const { lifiService } = await import('./services/lifi');
           const { getYieldComparison, getBestYieldOpportunities } = await import('./services/yieldFetcher');
+
+          // Gas requirements per chain (in native token)
+          const GAS_REQUIREMENTS: Record<number, { min: number; recommended: number; token: string }> = {
+            1: { min: 0.001, recommended: 0.005, token: 'ETH' },
+            42161: { min: 0.0001, recommended: 0.0005, token: 'ETH' },
+            10: { min: 0.0001, recommended: 0.0005, token: 'ETH' },
+            137: { min: 0.1, recommended: 0.5, token: 'MATIC' },
+            8453: { min: 0.0001, recommended: 0.0005, token: 'ETH' },
+            43114: { min: 0.01, recommended: 0.05, token: 'AVAX' },
+          };
+          const CHAIN_NAMES: Record<number, string> = {
+            1: 'Ethereum', 42161: 'Arbitrum', 10: 'Optimism', 137: 'Polygon', 8453: 'Base', 43114: 'Avalanche'
+          };
+
+          // First check wallet gas balances across all chains
+          addLog(agent.name, '⛽ Checking your gas balances across chains...');
+          const chainIds = [1, 42161, 10, 137, 8453, 43114];
+          const gasBalances: Record<number, { balance: number; token: string; hasEnough: boolean; chainName: string }> = {};
+
+          await Promise.all(chainIds.map(async (chainId) => {
+            const gasReq = GAS_REQUIREMENTS[chainId] || { min: 0.001, recommended: 0.005, token: 'ETH' };
+            const chainName = CHAIN_NAMES[chainId] || `Chain ${chainId}`;
+            try {
+              const nativeBal = await lifiService.getNativeBalance(walletAddress, chainId);
+              const hasEnough = nativeBal.balanceFormatted >= gasReq.min;
+              gasBalances[chainId] = {
+                balance: nativeBal.balanceFormatted,
+                token: gasReq.token,
+                hasEnough,
+                chainName,
+              };
+            } catch {
+              gasBalances[chainId] = { balance: 0, token: gasReq.token, hasEnough: false, chainName };
+            }
+          }));
+
+          // Display gas status
+          const chainsWithGas = Object.entries(gasBalances).filter(([_, g]) => g.hasEnough);
+          const chainsWithoutGas = Object.entries(gasBalances).filter(([_, g]) => !g.hasEnough);
+
+          addLog(agent.name, `\n💰 Your gas balances:`);
+          Object.entries(gasBalances).forEach(([chainId, g]) => {
+            const status = g.hasEnough ? '✅' : '⚠️';
+            const need = GAS_REQUIREMENTS[parseInt(chainId)]?.min || 0.001;
+            addLog(agent.name, `   ${status} ${g.chainName}: ${g.balance.toFixed(6)} ${g.token} ${g.hasEnough ? '(OK)' : `(need ${need})`}`);
+          });
+
+          if (chainsWithGas.length === 0) {
+            addLog(agent.name, `\n❌ No gas on any chain! You need native tokens to interact with DeFi.`);
+            throw new Error('No gas tokens found on any chain. Add ETH, MATIC, or AVAX to pay for transactions.');
+          }
+
+          addLog(agent.name, `\n📡 Scanning DeFi protocols (Aave, Compound, Stargate, GMX)...`);
+          await new Promise(r => setTimeout(r, 300));
 
           addLog(agent.name, '📊 Comparing APYs across all protocols...');
           const yieldData = await getYieldComparison('USDC');
-          const topOpportunities = await getBestYieldOpportunities('USDC', undefined, 500000);
+          const allOpportunities = await getBestYieldOpportunities('USDC', undefined, 500000);
 
-          addLog(agent.name, `✅ Found ${topOpportunities.length} yield opportunities`);
+          addLog(agent.name, `✅ Found ${allOpportunities.length} total yield opportunities`);
 
-          if (topOpportunities.length > 0) {
-            const best = yieldData.bestOpportunity;
-            const analysis = await geminiService.chat({
-              prompt: `You're ${agent.name}. Talk like a human - enthusiastic but clear. Found ${topOpportunities.length} opportunities. Best: ${best?.protocol} on ${best?.chainName} at ${best?.apy.toFixed(2)}% APY (${best?.risk} risk). Average: ${yieldData.averageApy.toFixed(2)}%. Give a short, conversational recommendation - 1-2 sentences.`
+          // Filter opportunities to chains where user has gas
+          const chainsWithGasIds = chainsWithGas.map(([id]) => parseInt(id));
+          const accessibleOpportunities = allOpportunities.filter(opp => chainsWithGasIds.includes(opp.chainId));
+          const inaccessibleOpportunities = allOpportunities.filter(opp => !chainsWithGasIds.includes(opp.chainId));
+
+          addLog(agent.name, `\n🎯 Yields you can access (have gas): ${accessibleOpportunities.length}`);
+          if (inaccessibleOpportunities.length > 0) {
+            addLog(agent.name, `⚠️ Yields requiring gas bridge: ${inaccessibleOpportunities.length}`);
+          }
+
+          // Show accessible opportunities first
+          if (accessibleOpportunities.length > 0) {
+            addLog(agent.name, `\n✅ ACCESSIBLE YIELDS (you have gas):`);
+            accessibleOpportunities.slice(0, 5).forEach((opp, i) => {
+              addLog(agent.name, `   ${i + 1}. ${opp.protocol} on ${opp.chainName}: ${opp.apy.toFixed(2)}% APY (${opp.risk} risk)`);
             });
+          }
+
+          // Show inaccessible opportunities with gas needed
+          if (inaccessibleOpportunities.length > 0) {
+            addLog(agent.name, `\n⚠️ YIELDS REQUIRING GAS BRIDGE:`);
+            inaccessibleOpportunities.slice(0, 3).forEach((opp) => {
+              const gasNeeded = GAS_REQUIREMENTS[opp.chainId];
+              addLog(agent.name, `   • ${opp.protocol} on ${opp.chainName}: ${opp.apy.toFixed(2)}% APY - needs ~${gasNeeded?.min} ${gasNeeded?.token}`);
+            });
+          }
+
+          // Use accessible opportunities for recommendation, but mention better ones if locked behind gas
+          const bestAccessible = accessibleOpportunities[0];
+          const bestOverall = allOpportunities[0];
+          const hasBetterInaccessible = bestOverall && bestAccessible && bestOverall.apy > bestAccessible.apy && !chainsWithGasIds.includes(bestOverall.chainId);
+
+          if (accessibleOpportunities.length > 0) {
+            let analysisPrompt = `You're ${agent.name}. Talk like a human - enthusiastic but clear. Found ${accessibleOpportunities.length} accessible opportunities (user has gas). Best accessible: ${bestAccessible?.protocol} on ${bestAccessible?.chainName} at ${bestAccessible?.apy.toFixed(2)}% APY (${bestAccessible?.risk} risk).`;
+            if (hasBetterInaccessible) {
+              analysisPrompt += ` Note: ${bestOverall.protocol} on ${bestOverall.chainName} offers ${bestOverall.apy.toFixed(2)}% APY but user needs to bridge gas there first.`;
+            }
+            analysisPrompt += ` Give a short, conversational recommendation - 1-2 sentences. Mention if bridging gas could unlock better yields.`;
+
+            const analysis = await geminiService.chat({ prompt: analysisPrompt });
 
             result = {
               type: 'yield_optimization',
-              opportunities: topOpportunities.slice(0, 10).map(opp =>
-                `${opp.protocol} on ${opp.chainName}: ${opp.apy.toFixed(2)}% APY (${opp.risk} risk)`
+              opportunities: accessibleOpportunities.slice(0, 10).map(opp =>
+                `${opp.protocol} on ${opp.chainName}: ${opp.apy.toFixed(2)}% APY (${opp.risk} risk) ✅`
               ),
-              bestYield: `${best?.apy.toFixed(2)}%`,
-              bestProtocol: best?.protocol,
-              bestChain: best?.chainName,
+              inaccessibleOpportunities: inaccessibleOpportunities.slice(0, 5).map(opp => {
+                const gasNeeded = GAS_REQUIREMENTS[opp.chainId];
+                return `${opp.protocol} on ${opp.chainName}: ${opp.apy.toFixed(2)}% APY - needs ${gasNeeded?.min} ${gasNeeded?.token}`;
+              }),
+              bestYield: `${bestAccessible?.apy.toFixed(2)}%`,
+              bestProtocol: bestAccessible?.protocol,
+              bestChain: bestAccessible?.chainName,
               averageApy: `${yieldData.averageApy.toFixed(2)}%`,
-              totalOpportunities: topOpportunities.length,
+              totalOpportunities: allOpportunities.length,
+              accessibleCount: accessibleOpportunities.length,
+              gasStatus: Object.fromEntries(Object.entries(gasBalances).map(([id, g]) => [CHAIN_NAMES[parseInt(id)], `${g.balance.toFixed(4)} ${g.token} ${g.hasEnough ? '✅' : '⚠️'}`])),
               analysis: analysis.text
             };
             taskType = 'yield_optimization';
-            summary = `Found ${topOpportunities.length} real yield opportunities. Best: ${best?.apy.toFixed(2)}% APY on ${best?.protocol} (${best?.chainName})`;
+            summary = `Found ${accessibleOpportunities.length} accessible yields (${allOpportunities.length} total). Best: ${bestAccessible?.apy.toFixed(2)}% APY on ${bestAccessible?.protocol} (${bestAccessible?.chainName})`;
+            if (hasBetterInaccessible) {
+              summary += ` | Better yield (${bestOverall.apy.toFixed(2)}%) on ${bestOverall.chainName} requires gas bridge.`;
+            }
           } else {
+            // No accessible opportunities but some exist
             const analysis = await geminiService.chat({
-              prompt: `You're ${agent.name}. Talk like a human. No great USDC yield opportunities right now across the chains we checked. One short, friendly sentence.`
+              prompt: `You're ${agent.name}. Talk like a human. Found ${allOpportunities.length} yield opportunities but user has no gas on those chains. Best overall: ${bestOverall?.protocol} on ${bestOverall?.chainName} at ${bestOverall?.apy.toFixed(2)}% APY but they need ${GAS_REQUIREMENTS[bestOverall?.chainId]?.min} ${GAS_REQUIREMENTS[bestOverall?.chainId]?.token} for gas. Suggest bridging gas first. One short sentence.`
             });
             result = {
               type: 'yield_optimization',
               opportunities: [],
-              bestYield: 'N/A',
-              message: 'No yield opportunities found',
+              inaccessibleOpportunities: allOpportunities.slice(0, 5).map(opp => {
+                const gasNeeded = GAS_REQUIREMENTS[opp.chainId];
+                return `${opp.protocol} on ${opp.chainName}: ${opp.apy.toFixed(2)}% APY - needs ${gasNeeded?.min} ${gasNeeded?.token}`;
+              }),
+              bestYield: 'N/A (no gas)',
+              message: `Found ${allOpportunities.length} opportunities but you need gas on those chains first.`,
+              gasStatus: Object.fromEntries(Object.entries(gasBalances).map(([id, g]) => [CHAIN_NAMES[parseInt(id)], `${g.balance.toFixed(4)} ${g.token} ${g.hasEnough ? '✅' : '⚠️'}`])),
               analysis: analysis.text
             };
             taskType = 'yield_optimization';
-            summary = `Scanned DeFi protocols. No significant yield opportunities found.`;
+            summary = `Found ${allOpportunities.length} yield opportunities but no gas on those chains. Bridge gas tokens first.`;
           }
         } catch (error: any) {
           console.error('Yield fetching error:', error);
@@ -772,80 +874,642 @@ const App: React.FC = () => {
         // Route Executor - Real execution with AUTO-SIGN and detailed logging
         addLog(agent.name, '⚡ Stilgar powering up...');
         await new Promise(r => setTimeout(r, 200));
+
+        // Skip execution when arbitrage intent but Chani found no opportunities
+        const chaniResult = context?.previousResults?.['a1'];
+        const isArbitrageIntent = (taskDescription || '').toLowerCase().includes('arbitrage') ||
+          context?.intentType === 'arbitrage';
+        const noArbitrageFound = chaniResult?.type === 'arbitrage_detection' &&
+          (chaniResult?.opportunities?.length === 0 || chaniResult?.message?.includes('No profitable'));
+
+        if (isArbitrageIntent && noArbitrageFound) {
+          addLog(agent.name, '⏸️ No arbitrage opportunities to execute. Chani found no profitable gaps.');
+          result = {
+            type: 'cross_chain_swap',
+            status: 'SKIPPED',
+            note: 'No arbitrage opportunities found — nothing to execute.',
+          };
+          taskType = 'cross_chain_swap';
+          summary = 'Skipped: No arbitrage opportunities found.';
+        } else {
         addLog(agent.name, '🔗 Connecting to LI.FI aggregator...');
-        await new Promise(r => setTimeout(r, 200));
+        // Wait for rate limit to reset from previous agent API calls
+        await new Promise(r => setTimeout(r, 3000));
+        addLog(agent.name, '📡 Checking routes...');
 
         try {
           const { lifiService } = await import('./services/lifi');
           const { prepareExecution, getExecutionSummary } = await import('./services/routeExecutor');
+          const { getPortfolioSummary } = await import('./services/portfolioTracker');
+          const taskLower = (taskDescription || '').toLowerCase();
+          const isVaultDeposit = (taskLower.includes('aave') || taskLower.includes('vault')) && (taskLower.includes('deposit') || taskLower.includes('supply') || taskLower.includes('put'));
+          const isYieldRequest = taskLower.includes('yield') || taskLower.includes('apy') || taskLower.includes('earn') || taskLower.includes('stake') || taskLower.includes('lend') || context?.intentType === 'yield_optimization';
+          const executionTaskType = isYieldRequest ? 'yield_deposit' : 'cross_chain_swap';
 
-          addLog(agent.name, '💰 Checking your USDC balances across all chains...');
+          // Detect which token user wants to use (ETH, USDC, or best available)
+          const wantsETH = taskLower.includes('eth') || taskLower.includes('ether');
+          const wantsUSDC = taskLower.includes('usdc') || taskLower.includes('stablecoin') || taskLower.includes('usd') || taskLower.includes('dollar') || (isYieldRequest && !wantsETH);
+          const preferEthereum = taskLower.includes('ethereum') || taskLower.includes('from ethereum') || taskLower.includes('on ethereum');
 
-          // Get USDC balance on ALL chains
-          const usdcBalances = await lifiService.getUSDCBalances(walletAddress);
+          addLog(agent.name, '💰 Checking your token balances across all chains...');
 
-          // Log all balances found
-          if (usdcBalances.length > 0) {
-            usdcBalances.forEach(b => {
-              addLog(agent.name, `   💵 ${b.chainName}: ${b.balanceFormatted.toFixed(2)} USDC`);
+          // Get full portfolio (all tokens including ETH and USDC)
+          const portfolio = await getPortfolioSummary(walletAddress);
+
+          // Also get USDC specifically from LI.FI (more reliable for USDC)
+          const lifiUsdc = await lifiService.getUSDCBalances(walletAddress);
+
+          // Build unified balance list with token info
+          interface TokenBalance { chainId: number; chainName: string; tokenSymbol: string; balanceFormatted: number; valueUSD: number; decimals: number; tokenAddress: string; }
+          const allBalances: TokenBalance[] = [];
+
+          // Add portfolio positions
+          portfolio.positions.forEach((p) => {
+            allBalances.push({
+              chainId: p.chainId,
+              chainName: p.chainName,
+              tokenSymbol: p.tokenSymbol,
+              balanceFormatted: p.balance,
+              valueUSD: p.valueUSD,
+              decimals: p.tokenSymbol === 'USDC' || p.tokenSymbol === 'USDT' ? 6 : 18,
+              tokenAddress: (p as any).token || '',
+            });
+          });
+
+          // Merge LI.FI USDC (may have better data)
+          lifiUsdc.forEach((b) => {
+            const existing = allBalances.find((a) => a.chainId === b.chainId && a.tokenSymbol === 'USDC');
+            if (!existing) {
+              allBalances.push({ chainId: b.chainId, chainName: b.chainName, tokenSymbol: 'USDC', balanceFormatted: b.balanceFormatted, valueUSD: b.valueUSD, decimals: 6, tokenAddress: b.tokenAddress });
+            } else if (b.balanceFormatted > existing.balanceFormatted) {
+              existing.balanceFormatted = b.balanceFormatted;
+              existing.valueUSD = b.valueUSD;
+            }
+          });
+
+          // Log all balances found across all chains
+          if (allBalances.length === 0) {
+            addLog(agent.name, '❌ No token balances found on any chain');
+            throw new Error('No token balances found. Add funds to your wallet.');
+          }
+
+          // Group balances by chain for clear display
+          const balancesByChain: Record<string, typeof allBalances> = {};
+          allBalances.forEach(b => {
+            if (!balancesByChain[b.chainName]) balancesByChain[b.chainName] = [];
+            balancesByChain[b.chainName].push(b);
+          });
+
+          addLog(agent.name, '📊 Found balances on the following chains:');
+          Object.entries(balancesByChain).forEach(([chainName, balances]) => {
+            const chainTotal = balances.reduce((sum, b) => sum + b.valueUSD, 0);
+            addLog(agent.name, `\n   🔗 ${chainName} (Total: $${chainTotal.toFixed(2)}):`);
+            balances.forEach(b => {
+              addLog(agent.name, `      • ${b.balanceFormatted.toFixed(6)} ${b.tokenSymbol} (~$${b.valueUSD.toFixed(2)})`);
+            });
+          });
+
+          // Filter balances based on user's token preference
+          let candidateBalances = allBalances;
+          const requestedToken = wantsETH ? 'ETH' : wantsUSDC ? 'USDC' : null;
+
+          if (wantsETH && !wantsUSDC) {
+            candidateBalances = allBalances.filter((b) => b.tokenSymbol === 'ETH' || b.tokenSymbol === 'WETH');
+            if (candidateBalances.length === 0) {
+              addLog(agent.name, `\n❌ No ETH found on any chain`);
+              throw new Error('No ETH balance found. You asked for ETH but have none. Check your balances above.');
+            }
+            addLog(agent.name, `\n🔍 Filtering for ETH as requested...`);
+          } else if (wantsUSDC && !wantsETH) {
+            candidateBalances = allBalances.filter((b) => b.tokenSymbol === 'USDC');
+            if (candidateBalances.length === 0) {
+              addLog(agent.name, `\n❌ No USDC found on any chain`);
+              throw new Error('No USDC balance found. You asked for USDC but have none. Check your balances above.');
+            }
+            addLog(agent.name, `\n🔍 Filtering for USDC as requested...`);
+          }
+
+          // Sort by USD value (highest first)
+          candidateBalances.sort((a, b) => b.valueUSD - a.valueUSD);
+
+          // Check if user specified a chain preference
+          const chainPreferences: Record<string, number> = {
+            'ethereum': 1, 'eth mainnet': 1, 'mainnet': 1,
+            'arbitrum': 42161, 'arb': 42161,
+            'optimism': 10, 'op': 10,
+            'polygon': 137, 'matic': 137,
+            'base': 8453,
+            'avalanche': 43114, 'avax': 43114,
+          };
+          let preferredChainId: number | null = null;
+          for (const [keyword, chainId] of Object.entries(chainPreferences)) {
+            if (taskLower.includes(keyword)) {
+              preferredChainId = chainId;
+              break;
+            }
+          }
+
+          // Parse requested amount early (used for yield-aware source selection)
+          const amountMatch = taskLower.match(/(\d+(?:\.\d+)?)\s*(?:eth|usdc|usd|ether)?\b/);
+          const requestedAmount = amountMatch ? parseFloat(amountMatch[1]) : null;
+          const minBalanceForSource = requestedAmount != null && requestedAmount > 0 ? requestedAmount : 0.01;
+
+          // Find source balance - prefer user's chain choice, else yield-aware (same chain as best yield), else highest value
+          let sourceBalance: typeof candidateBalances[0] | undefined;
+          if (preferredChainId) {
+            sourceBalance = candidateBalances.find((b) => b.chainId === preferredChainId && b.valueUSD >= 0.01);
+            if (sourceBalance) {
+              addLog(agent.name, `\n✅ Using ${sourceBalance.tokenSymbol} from ${sourceBalance.chainName} as you specified`);
+            }
+          }
+
+          if (!sourceBalance && isYieldRequest && !preferredChainId && candidateBalances.length > 1) {
+            // Yield-aware: consider Arbitrum, Optimism, etc. – prefer chain with best same-chain yield to avoid bridging
+            addLog(agent.name, `\n🌾 Evaluating yields across all chains (Arbitrum, Optimism, Base, etc.)...`);
+            const GAS_REQUIREMENTS: Record<number, { min: number; recommended: number; token: string }> = {
+              1: { min: 0.001, recommended: 0.005, token: 'ETH' },      // Ethereum mainnet - expensive
+              42161: { min: 0.0001, recommended: 0.0005, token: 'ETH' }, // Arbitrum - cheap
+              10: { min: 0.0001, recommended: 0.0005, token: 'ETH' },    // Optimism - cheap
+              137: { min: 0.1, recommended: 0.5, token: 'MATIC' },       // Polygon - needs MATIC
+              8453: { min: 0.0001, recommended: 0.0005, token: 'ETH' },  // Base - cheap
+              43114: { min: 0.01, recommended: 0.05, token: 'AVAX' },    // Avalanche - needs AVAX
+            };
+            const allChainIds = [1, 42161, 10, 137, 8453, 43114];
+            const gasByChain: Record<number, boolean> = {};
+            for (const cid of allChainIds) {
+              const gasReq = GAS_REQUIREMENTS[cid] || { min: 0.001, recommended: 0.005, token: 'ETH' };
+              const bal = await lifiService.getNativeBalance(walletAddress, cid);
+              gasByChain[cid] = bal.balanceFormatted >= gasReq.min;
+            }
+            const chainsWithGasSet = new Set(allChainIds.filter(c => gasByChain[c]));
+            const tokenSymbolForYield = wantsUSDC ? 'USDC' : (wantsETH ? 'WETH' : 'USDC');
+            const { getBestYieldOpportunities } = await import('./services/yieldFetcher');
+            const yieldOpps = await getBestYieldOpportunities(tokenSymbolForYield, undefined, 100000);
+            const accessibleYields = yieldOpps.filter(o => chainsWithGasSet.has(o.chainId));
+            const bestYield = accessibleYields[0];
+            const sufficentBalances = candidateBalances.filter(b => b.balanceFormatted >= minBalanceForSource && gasByChain[b.chainId]);
+            if (bestYield && sufficentBalances.length > 0) {
+              const sameChainBalance = sufficentBalances.find(b => b.chainId === bestYield.chainId);
+              if (sameChainBalance) {
+                sourceBalance = sameChainBalance;
+                addLog(agent.name, `\n✅ Using ${sourceBalance.tokenSymbol} from ${sourceBalance.chainName} – same chain as best yield (${bestYield.protocol} at ${bestYield.apy.toFixed(2)}% APY), no bridging needed`);
+              }
+            }
+          }
+
+          if (!sourceBalance) {
+            // No chain specified or preferred chain has no balance - use highest value
+            sourceBalance = candidateBalances.find((b) => b.valueUSD >= 0.01);
+          }
+
+          if (!sourceBalance) {
+            const tokenType = requestedToken || 'tokens';
+            addLog(agent.name, `\n❌ No ${tokenType} with sufficient balance found`);
+            throw new Error(`No ${tokenType} with sufficient balance. Minimum ~$0.01 required.`);
+          }
+
+          // If multiple options exist and user didn't specify chain, show recommendation
+          const otherOptions = candidateBalances.filter(b => b !== sourceBalance && b.valueUSD >= 0.01);
+          if (otherOptions.length > 0 && !preferredChainId) {
+            addLog(agent.name, `\n💡 Auto-selected: ${sourceBalance.balanceFormatted.toFixed(6)} ${sourceBalance.tokenSymbol} on ${sourceBalance.chainName} (~$${sourceBalance.valueUSD.toFixed(2)})`);
+            addLog(agent.name, `   Other options available: ${otherOptions.map(b => `${b.chainName}`).join(', ')}`);
+            addLog(agent.name, `   To use a different chain, say: "use my ETH from [chain name]"`);
+          } else {
+            addLog(agent.name, `\n✅ Selected: ${sourceBalance.balanceFormatted.toFixed(6)} ${sourceBalance.tokenSymbol} on ${sourceBalance.chainName} (~$${sourceBalance.valueUSD.toFixed(2)})`);
+          }
+
+          // Gas requirements per chain (in native token)
+          const GAS_REQUIREMENTS: Record<number, { min: number; recommended: number; token: string }> = {
+            1: { min: 0.001, recommended: 0.005, token: 'ETH' },      // Ethereum mainnet - expensive
+            42161: { min: 0.0001, recommended: 0.0005, token: 'ETH' }, // Arbitrum - cheap
+            10: { min: 0.0001, recommended: 0.0005, token: 'ETH' },    // Optimism - cheap
+            137: { min: 0.1, recommended: 0.5, token: 'MATIC' },       // Polygon - needs MATIC
+            8453: { min: 0.0001, recommended: 0.0005, token: 'ETH' },  // Base - cheap
+            43114: { min: 0.01, recommended: 0.05, token: 'AVAX' },    // Avalanche - needs AVAX
+          };
+
+          // Check gas on SOURCE chain
+          addLog(agent.name, `\n⛽ Checking gas balances...`);
+          const isSourceNativeToken = sourceBalance.tokenSymbol === 'ETH' || sourceBalance.tokenSymbol === 'MATIC' || sourceBalance.tokenSymbol === 'AVAX';
+          const sourceGasReq = GAS_REQUIREMENTS[sourceBalance.chainId] || { min: 0.001, recommended: 0.005, token: 'ETH' };
+
+          const sourceNativeBal = await lifiService.getNativeBalance(walletAddress, sourceBalance.chainId);
+          addLog(agent.name, `   ${sourceBalance.chainName}: ${sourceNativeBal.balanceFormatted.toFixed(6)} ${sourceGasReq.token}`);
+
+          if (!isSourceNativeToken && sourceNativeBal.balanceFormatted < sourceGasReq.min) {
+            addLog(agent.name, `   ❌ Insufficient ${sourceGasReq.token} for gas on ${sourceBalance.chainName}`);
+            addLog(agent.name, `      Need: ~${sourceGasReq.min} ${sourceGasReq.token} (recommended: ${sourceGasReq.recommended})`);
+            addLog(agent.name, `      Have: ${sourceNativeBal.balanceFormatted.toFixed(6)} ${sourceGasReq.token}`);
+            throw new Error(`Need ~${sourceGasReq.min} ${sourceGasReq.token} for gas on ${sourceBalance.chainName}. You have ${sourceNativeBal.balanceFormatted.toFixed(6)}.`);
+          } else if (!isSourceNativeToken) {
+            addLog(agent.name, `   ✅ Source chain gas: OK`);
+          }
+
+          // Check gas on potential DESTINATION chains and factor into yield recommendation
+          const destinationChainIds = [42161, 10, 137, 8453, 1].filter(c => c !== sourceBalance.chainId);
+          const gasBalances: Record<number, { balance: number; token: string; hasEnough: boolean; chainName: string }> = {};
+
+          addLog(agent.name, `\n⛽ Checking destination chain gas for yield opportunities...`);
+          for (const destChainId of destinationChainIds) {
+            const destGasReq = GAS_REQUIREMENTS[destChainId] || { min: 0.001, recommended: 0.005, token: 'ETH' };
+            const destChainName = { 1: 'Ethereum', 42161: 'Arbitrum', 10: 'Optimism', 137: 'Polygon', 8453: 'Base', 43114: 'Avalanche' }[destChainId] || `Chain ${destChainId}`;
+            const destNativeBal = await lifiService.getNativeBalance(walletAddress, destChainId);
+            const hasEnough = destNativeBal.balanceFormatted >= destGasReq.min;
+
+            gasBalances[destChainId] = {
+              balance: destNativeBal.balanceFormatted,
+              token: destGasReq.token,
+              hasEnough,
+              chainName: destChainName,
+            };
+
+            const status = hasEnough ? '✅' : '⚠️';
+            addLog(agent.name, `   ${status} ${destChainName}: ${destNativeBal.balanceFormatted.toFixed(6)} ${destGasReq.token} ${hasEnough ? '(OK)' : `(need ${destGasReq.min})`}`);
+          }
+
+          // Warn user about chains they can't use due to gas
+          const chainsWithoutGas = Object.values(gasBalances).filter(g => !g.hasEnough);
+          if (chainsWithoutGas.length > 0) {
+            addLog(agent.name, `\n⚠️ Warning: You don't have enough gas on: ${chainsWithoutGas.map(g => g.chainName).join(', ')}`);
+            addLog(agent.name, `   Yields on these chains will require you to first bridge gas tokens.`);
+          }
+
+          // Store gas info for yield filtering later
+          const chainsWithGas = Object.entries(gasBalances).filter(([_, g]) => g.hasEnough).map(([id]) => parseInt(id));
+
+          // Reserve gas when using native tokens (ETH, MATIC, AVAX)
+          const isNativeToken = sourceBalance.tokenSymbol === 'ETH' || sourceBalance.tokenSymbol === 'MATIC' || sourceBalance.tokenSymbol === 'AVAX';
+          const gasReserve = isNativeToken ? (sourceGasReq.recommended * 2) : 0; // Reserve 2x recommended gas
+          const maxUsableBalance = isNativeToken
+            ? Math.max(0, sourceBalance.balanceFormatted - gasReserve)
+            : sourceBalance.balanceFormatted;
+
+          if (isNativeToken && maxUsableBalance <= 0) {
+            addLog(agent.name, `⚠️ Not enough ${sourceBalance.tokenSymbol} after reserving gas`);
+            addLog(agent.name, `   Balance: ${sourceBalance.balanceFormatted.toFixed(6)} ${sourceBalance.tokenSymbol}`);
+            addLog(agent.name, `   Gas reserve: ${gasReserve.toFixed(6)} ${sourceBalance.tokenSymbol}`);
+            throw new Error(`Not enough ${sourceBalance.tokenSymbol}. Need to reserve ${gasReserve.toFixed(6)} for gas. You have ${sourceBalance.balanceFormatted.toFixed(6)}.`);
+          }
+
+          let amountToUse = requestedAmount != null && requestedAmount > 0
+            ? Math.min(requestedAmount, maxUsableBalance)
+            : maxUsableBalance * 0.95; // Use 95% of usable balance if not specified
+
+          if (isNativeToken) {
+            addLog(agent.name, `\n💡 Reserving ${gasReserve.toFixed(6)} ${sourceBalance.tokenSymbol} for gas`);
+            addLog(agent.name, `   Using: ${amountToUse.toFixed(6)} ${sourceBalance.tokenSymbol} (~$${(amountToUse * (sourceBalance.valueUSD / sourceBalance.balanceFormatted)).toFixed(2)})`);
+          }
+
+          // Minimum amounts - cross-chain bridges typically need $5-25+
+          const isCrossChain = !isYieldRequest || sourceBalance.chainId !== 1; // Cross-chain if not yield on same chain
+          const MIN_USD_VALUE = isCrossChain ? 5 : 2; // Cross-chain needs more
+          const amountValueUSD = amountToUse * (sourceBalance.valueUSD / sourceBalance.balanceFormatted);
+          if (amountValueUSD < MIN_USD_VALUE) {
+            addLog(agent.name, `⚠️ Amount ${amountToUse.toFixed(4)} ${sourceBalance.tokenSymbol} (~$${amountValueUSD.toFixed(2)}) is below minimum`);
+            addLog(agent.name, `   ${isCrossChain ? 'Cross-chain bridges typically require $5-25+ minimum' : 'Minimum $2 required'}`);
+            addLog(agent.name, `   You have: $${sourceBalance.valueUSD.toFixed(2)} in ${sourceBalance.tokenSymbol}`);
+            throw new Error(`Amount too low. ${isCrossChain ? 'Most bridges need $5-25+ minimum' : 'Need at least $2'}. You have $${sourceBalance.valueUSD.toFixed(2)}.`);
+          }
+
+          // Convert to raw amount based on decimals
+          const amountRaw = Math.floor(amountToUse * Math.pow(10, sourceBalance.decimals)).toString();
+
+          let executionPlan: any;
+          let toChain: number;
+          let toChainName: string;
+
+          // Token address mappings for supported tokens
+          const TOKEN_ADDRESSES: Record<string, Record<number, string>> = {
+            USDC: {
+              1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+              42161: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+              10: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',
+              137: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
+              8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+            },
+            ETH: { // WETH addresses (native ETH uses 0xEeee...)
+              1: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+              42161: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+              10: '0x4200000000000000000000000000000000000006',
+              137: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619',
+              8453: '0x4200000000000000000000000000000000000006',
+            },
+            WETH: {
+              1: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+              42161: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+              10: '0x4200000000000000000000000000000000000006',
+              137: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619',
+              8453: '0x4200000000000000000000000000000000000006',
+            },
+          };
+          // Native token address for LI.FI
+          const NATIVE_TOKEN_ADDRESS = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+
+          // Handle yield requests - find best yield and execute deposit
+          if (isYieldRequest && !isVaultDeposit) {
+            addLog(agent.name, `\n🌾 Finding best yield for ${sourceBalance.tokenSymbol}...`);
+
+            // Get yield data for the user's token
+            const { getBestYieldOpportunities } = await import('./services/yieldFetcher');
+            const tokenSymbolForYield = sourceBalance.tokenSymbol === 'ETH' ? 'WETH' : sourceBalance.tokenSymbol;
+            const yieldOpps = await getBestYieldOpportunities(tokenSymbolForYield, undefined, 100000);
+
+            // Filter to accessible chains (where user has gas)
+            const accessibleYields = yieldOpps.filter(opp => chainsWithGas.includes(opp.chainId) || opp.chainId === sourceBalance.chainId);
+            const sameChainYields = yieldOpps.filter(opp => opp.chainId === sourceBalance.chainId);
+
+            addLog(agent.name, `\n📊 Found ${accessibleYields.length} accessible yield opportunities`);
+
+            if (sameChainYields.length > 0) {
+              addLog(agent.name, `\n✅ Best yields on ${sourceBalance.chainName}:`);
+              sameChainYields.slice(0, 3).forEach((opp, i) => {
+                addLog(agent.name, `   ${i + 1}. ${opp.protocol}: ${opp.apy.toFixed(2)}% APY (${opp.risk} risk)`);
+              });
+            }
+
+            // Find best accessible yield - prefer same chain to avoid bridging
+            // When cross-chain: for USDC prefer Aave on Arbitrum (bridge+deposit in one tx via Arc/CCTP)
+            let bestYield = sameChainYields[0] || accessibleYields[0];
+            if (!sameChainYields[0] && sourceBalance.tokenSymbol === 'USDC' && sourceBalance.chainId !== 42161) {
+              const aaveOnArb = accessibleYields.find(o => o.chainId === 42161 && o.protocol.toLowerCase().includes('aave'));
+              if (aaveOnArb) {
+                bestYield = aaveOnArb;
+                addLog(agent.name, `\n⚡ Preferring Aave on Arbitrum: bridge + deposit in one transaction`);
+              }
+            }
+
+            if (!bestYield) {
+              addLog(agent.name, `\n❌ No accessible yield opportunities found for ${sourceBalance.tokenSymbol}`);
+              throw new Error(`No yield opportunities found for ${sourceBalance.tokenSymbol}. Try a different token.`);
+            }
+
+            addLog(agent.name, `\n🎯 Best option: ${bestYield.protocol} on ${bestYield.chainName} at ${bestYield.apy.toFixed(2)}% APY`);
+
+            // Check if we need to bridge (different chain than source)
+            const needsBridge = bestYield.chainId !== sourceBalance.chainId;
+            toChain = bestYield.chainId;
+            toChainName = bestYield.chainName;
+
+            if (needsBridge) {
+              addLog(agent.name, `\n🌉 Will bridge ${sourceBalance.tokenSymbol} from ${sourceBalance.chainName} → ${toChainName}`);
+              addLog(agent.name, `   Then deposit into ${bestYield.protocol} for ${bestYield.apy.toFixed(2)}% APY`);
+            } else {
+              addLog(agent.name, `\n📝 Will deposit ${amountToUse.toFixed(4)} ${sourceBalance.tokenSymbol} into ${bestYield.protocol}`);
+            }
+
+            // For Aave deposits
+            if (bestYield.protocol.toLowerCase().includes('aave')) {
+              // Check if same chain - if so, just direct deposit (no bridging needed)
+              if (!needsBridge && sourceBalance.tokenSymbol === 'USDC') {
+                addLog(agent.name, `\n✅ Your USDC is already on ${sourceBalance.chainName}!`);
+                addLog(agent.name, `   Amount: ${amountToUse.toFixed(4)} USDC (~$${amountValueUSD.toFixed(2)})`);
+                addLog(agent.name, `\n🎯 Ready to deposit into ${bestYield.protocol}:`);
+                addLog(agent.name, `   APY: ${bestYield.apy.toFixed(2)}%`);
+                addLog(agent.name, `   Risk: ${bestYield.risk}`);
+                const usdcAddr = TOKEN_ADDRESSES['USDC']?.[sourceBalance.chainId] || sourceBalance.tokenAddress;
+                if (walletClient) {
+                  addLog(agent.name, `\n🔐 Wallet detected! Auto-executing deposit (switch chain + sign when prompted)...`);
+                  try {
+                    if (walletClient.chain?.id !== sourceBalance.chainId && typeof window !== 'undefined' && (window as any).ethereum) {
+                      addLog(agent.name, `\n🔄 Switching your wallet to ${sourceBalance.chainName}...`);
+                      const hexChainId = '0x' + sourceBalance.chainId.toString(16);
+                      await (window as any).ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hexChainId }] });
+                      await new Promise(r => setTimeout(r, 1500));
+                    }
+                    const { executeDirectAaveDeposit } = await import('./services/directAaveDeposit');
+                    addLog(agent.name, `📝 Approving USDC and depositing into Aave...`);
+                    const depositResult = await executeDirectAaveDeposit(
+                      { chainId: sourceBalance.chainId, usdcAddress: usdcAddr, amountRaw, fromAddress: walletAddress, skipChainCheck: walletClient.chain?.id !== sourceBalance.chainId },
+                      walletClient
+                    );
+                    if (depositResult.success) {
+                      const txHash = depositResult.txHash || 'pending';
+                      addLog(agent.name, `✅ Transaction submitted! Hash: ${txHash}`);
+                      toast.success('Deposit submitted! Check your wallet for confirmation.');
+                      result = { type: 'yield_deposit', status: 'EXECUTED', transactionHash: txHash, note: `Deposited ${amountToUse.toFixed(4)} USDC into Aave.` };
+                      summary = `✅ Deposited ${amountToUse.toFixed(4)} USDC into ${bestYield.protocol}. TX: ${txHash.slice(0, 10)}...`;
+                    } else {
+                      throw new Error(depositResult.error);
+                    }
+                  } catch (execErr: any) {
+                    addLog(agent.name, `❌ Execution failed: ${execErr.message}`);
+                    result = { type: 'yield_deposit', status: 'ERROR', error: execErr.message };
+                    summary = `❌ Deposit failed: ${execErr.message}`;
+                  }
+                } else {
+                  addLog(agent.name, `\n🔗 Connect your wallet to execute the deposit.`);
+                  result = { type: 'yield_deposit', status: 'SAME_CHAIN', note: 'Connect wallet to deposit, or visit app.aave.com.' };
+                }
+                taskType = executionTaskType;
+                summary = `✅ Same-chain yield: deposit ${amountToUse.toFixed(4)} USDC into ${bestYield.protocol} - signature required`;
+                executionPlan = { readyToExecute: false, quote: null, warnings: [], steps: [], estimatedOutputUSD: amountValueUSD, gasCostUSD: 0, netValueUSD: amountValueUSD };
+              } else if (sourceBalance.tokenSymbol !== 'USDC') {
+              // Convert to USDC first if not already USDC (Aave vault expects USDC)
+                addLog(agent.name, `\n🔄 ${bestYield.protocol} vault requires USDC - will swap ${sourceBalance.tokenSymbol} → USDC first`);
+                // Route: ETH → USDC on destination chain, then deposit to Aave
+                const usdcOnDest = TOKEN_ADDRESSES['USDC'][toChain];
+                const fromTokenAddr = isNativeToken ? NATIVE_TOKEN_ADDRESS : (TOKEN_ADDRESSES[sourceBalance.tokenSymbol]?.[sourceBalance.chainId] || sourceBalance.tokenAddress);
+
+                executionPlan = await prepareExecution({
+                  fromChain: sourceBalance.chainId,
+                  toChain: toChain,
+                  fromToken: fromTokenAddr,
+                  toToken: usdcOnDest,
+                  fromAmount: amountRaw,
+                  fromAddress: walletAddress,
+                });
+
+                if (executionPlan.readyToExecute) {
+                  addLog(agent.name, `\n✅ Route found: Swap to USDC on ${toChainName}`);
+                  addLog(agent.name, `   After swap completes, deposit USDC into ${bestYield.protocol}`);
+                }
+              } else {
+                // USDC but needs bridging - use cross-chain vault deposit
+                addLog(agent.name, `🛣️ Bridge + supply USDC in one transaction...`);
+                const { getCrossChainVaultDepositQuote, vaultDepositToExecutionPlan } = await import('./services/crossChainVaultDeposit');
+                const vaultResult = await getCrossChainVaultDepositQuote({
+                  fromChainId: sourceBalance.chainId,
+                  fromAmount: amountRaw,
+                  fromAddress: walletAddress,
+                });
+                if (vaultResult) {
+                  executionPlan = vaultDepositToExecutionPlan(vaultResult, amountToUse);
+                  executionPlan.estimatedOutputUSD = amountValueUSD;
+                  executionPlan.netValueUSD = amountValueUSD - executionPlan.gasCostUSD;
+                } else {
+                  throw new Error('No route available for Aave deposit');
+                }
+              }
+            } else {
+              // For other protocols
+              if (!needsBridge) {
+                // Same chain - no bridging needed! User can deposit directly
+                addLog(agent.name, `\n✅ Your ${sourceBalance.tokenSymbol} is already on ${sourceBalance.chainName}!`);
+                addLog(agent.name, `   Amount: ${amountToUse.toFixed(4)} ${sourceBalance.tokenSymbol} (~$${amountValueUSD.toFixed(2)})`);
+                addLog(agent.name, `\n🎯 Ready to deposit into ${bestYield.protocol}:`);
+                addLog(agent.name, `   APY: ${bestYield.apy.toFixed(2)}%`);
+                addLog(agent.name, `   Risk: ${bestYield.risk}`);
+                addLog(agent.name, `   TVL: $${(bestYield.tvl / 1e6).toFixed(1)}M`);
+                addLog(agent.name, `\n🔗 Deposit here: ${bestYield.url || `https://defillama.com/yields`}`);
+
+                // Create a "no-op" execution plan that shows the opportunity without swapping
+                executionPlan = {
+                  quote: null,
+                  riskAnalysis: { isValid: true, riskScore: 10, slippage: 0 },
+                  estimatedOutput: amountRaw,
+                  estimatedOutputUSD: amountValueUSD,
+                  gasCostUSD: 0,
+                  totalCostUSD: amountValueUSD,
+                  netValueUSD: amountValueUSD,
+                  steps: [],
+                  readyToExecute: false, // No swap needed
+                  warnings: [],
+                };
+
+                // Show other options too
+                const otherYields = sameChainYields.slice(1, 4);
+                if (otherYields.length > 0) {
+                  addLog(agent.name, `\n📋 Other options on ${sourceBalance.chainName}:`);
+                  otherYields.forEach((opp, i) => {
+                    addLog(agent.name, `   ${i + 1}. ${opp.protocol}: ${opp.apy.toFixed(2)}% APY`);
+                  });
+                }
+
+                // Skip auto-execution since no swap is needed
+                addLog(agent.name, `\n💡 No transaction needed - visit the protocol directly to deposit.`);
+                return; // Exit early - no swap to execute
+              } else {
+                // Different chain - need to bridge first
+                const fromTokenAddr = isNativeToken ? NATIVE_TOKEN_ADDRESS : (TOKEN_ADDRESSES[sourceBalance.tokenSymbol]?.[sourceBalance.chainId] || sourceBalance.tokenAddress);
+                let toTokenAddr = TOKEN_ADDRESSES[sourceBalance.tokenSymbol]?.[toChain];
+                if (!toTokenAddr && sourceBalance.tokenSymbol === 'ETH') {
+                  toTokenAddr = TOKEN_ADDRESSES['WETH'][toChain];
+                }
+                if (!toTokenAddr) {
+                  toTokenAddr = TOKEN_ADDRESSES['USDC'][toChain];
+                  addLog(agent.name, `   ℹ️ ${sourceBalance.tokenSymbol} not available on ${toChainName}, will receive USDC`);
+                }
+
+                executionPlan = await prepareExecution({
+                  fromChain: sourceBalance.chainId,
+                  toChain: toChain,
+                  fromToken: fromTokenAddr,
+                  toToken: toTokenAddr,
+                  fromAmount: amountRaw,
+                  fromAddress: walletAddress,
+                });
+
+                if (executionPlan.readyToExecute) {
+                  addLog(agent.name, `\n✅ Route ready! After bridging, deposit into ${bestYield.protocol} via their interface`);
+                  addLog(agent.name, `   URL: ${bestYield.url || `https://${bestYield.protocol.toLowerCase()}.com`}`);
+                }
+              }
+            }
+
+          } else if (isVaultDeposit) {
+            // Vault deposit only supports USDC
+            if (sourceBalance.tokenSymbol !== 'USDC') {
+              addLog(agent.name, `⚠️ Aave vault deposit requires USDC, but you selected ${sourceBalance.tokenSymbol}`);
+              addLog(agent.name, `   First swap your ${sourceBalance.tokenSymbol} to USDC, then retry vault deposit.`);
+              throw new Error(`Vault deposit requires USDC. You have ${sourceBalance.tokenSymbol}. Swap to USDC first.`);
+            }
+            toChain = 42161; // Arbitrum - Aave V3
+            toChainName = 'Arbitrum';
+
+            // Check if user has gas on Arbitrum for vault deposit
+            if (!chainsWithGas.includes(42161)) {
+              const arbGas = gasBalances[42161];
+              addLog(agent.name, `\n⚠️ Warning: Low gas on Arbitrum!`);
+              addLog(agent.name, `   You have ${arbGas?.balance?.toFixed(6) || 0} ETH, need ~0.0001 ETH`);
+              addLog(agent.name, `   You can still deposit, but you'll need ETH on Arbitrum to withdraw later.`);
+            }
+
+            addLog(agent.name, `📝 Will deposit ${amountToUse.toFixed(4)} USDC into Aave V3 on Arbitrum`);
+            addLog(agent.name, `🛣️ Bridge + supply in one transaction from ${sourceBalance.chainName}...`);
+            const { getCrossChainVaultDepositQuote, vaultDepositToExecutionPlan } = await import('./services/crossChainVaultDeposit');
+            const vaultResult = await getCrossChainVaultDepositQuote({
+              fromChainId: sourceBalance.chainId,
+              fromAmount: amountRaw,
+              fromAddress: walletAddress,
+            });
+            if (!vaultResult) {
+              addLog(agent.name, '❌ No route for cross-chain Aave deposit. Try a different amount (10+ USDC) or chain.');
+              throw new Error('No route available for cross-chain Aave deposit');
+            }
+            executionPlan = vaultDepositToExecutionPlan(vaultResult, amountToUse);
+            executionPlan.estimatedOutputUSD = amountValueUSD;
+            executionPlan.netValueUSD = amountValueUSD - executionPlan.gasCostUSD;
+          } else {
+            // Standard swap/bridge - works with any token
+            // Prioritize destination chains where user has gas
+            const allDestinationChains = [42161, 10, 137, 8453, 1].filter(c => c !== sourceBalance.chainId);
+            const destinationChainsWithGas = allDestinationChains.filter(c => chainsWithGas.includes(c));
+            const destinationChainsWithoutGas = allDestinationChains.filter(c => !chainsWithGas.includes(c));
+
+            // Prefer chains with gas, fall back to others if none available
+            const destinationChains = destinationChainsWithGas.length > 0
+              ? destinationChainsWithGas
+              : allDestinationChains;
+
+            toChain = destinationChains[0];
+            toChainName = { 1: 'Ethereum', 42161: 'Arbitrum', 10: 'Optimism', 137: 'Polygon', 8453: 'Base' }[toChain] || 'Unknown';
+
+            // Warn if no destination has gas
+            if (destinationChainsWithGas.length === 0) {
+              addLog(agent.name, `\n⚠️ Warning: No gas on any destination chain.`);
+              addLog(agent.name, `   You'll receive tokens on ${toChainName} but won't be able to use them without bridging gas.`);
+            } else if (destinationChainsWithoutGas.length > 0) {
+              addLog(agent.name, `\n💡 Selected ${toChainName} (you have gas there)`);
+            }
+
+            // Get token addresses - use native address for ETH, or lookup for others
+            const isSourceNative = sourceBalance.tokenSymbol === 'ETH' || sourceBalance.tokenSymbol === 'MATIC' || sourceBalance.tokenSymbol === 'AVAX';
+            const fromTokenAddr = isSourceNative
+              ? NATIVE_TOKEN_ADDRESS
+              : (TOKEN_ADDRESSES[sourceBalance.tokenSymbol]?.[sourceBalance.chainId] || sourceBalance.tokenAddress);
+
+            // For destination, swap to same token on destination chain (or USDC if not available)
+            let toTokenAddr = TOKEN_ADDRESSES[sourceBalance.tokenSymbol]?.[toChain];
+            let toTokenSymbol = sourceBalance.tokenSymbol;
+            if (!toTokenAddr) {
+              // If token not available on dest chain, swap to USDC
+              toTokenAddr = TOKEN_ADDRESSES['USDC'][toChain];
+              toTokenSymbol = 'USDC';
+              addLog(agent.name, `   ℹ️ ${sourceBalance.tokenSymbol} not available on ${toChainName}, will receive USDC`);
+            }
+
+            addLog(agent.name, `✅ Using ${amountToUse.toFixed(4)} ${sourceBalance.tokenSymbol} from ${sourceBalance.chainName}`);
+            addLog(agent.name, `📝 Will bridge/swap to ${toTokenSymbol} on ${toChainName}`);
+            addLog(agent.name, `🛣️ Finding optimal route ${sourceBalance.chainName} → ${toChainName}...`);
+            addLog(agent.name, `   📋 From: ${sourceBalance.tokenSymbol} on chain ${sourceBalance.chainId}`);
+            addLog(agent.name, `   📋 To: ${toTokenSymbol} on chain ${toChain}`);
+            await new Promise(r => setTimeout(r, 300));
+
+            executionPlan = await prepareExecution({
+              fromChain: sourceBalance.chainId,
+              toChain: toChain,
+              fromToken: fromTokenAddr,
+              toToken: toTokenAddr,
+              fromAmount: amountRaw,
+              fromAddress: walletAddress,
             });
           }
 
-          // Find the chain with the highest USDC balance
-          const sortedBalances = [...usdcBalances].sort((a, b) => b.balanceFormatted - a.balanceFormatted);
-          const sourceBalance = sortedBalances.find(b => b.balanceFormatted >= 1);
-
-          if (!sourceBalance) {
-            addLog(agent.name, '❌ No chain has sufficient USDC balance (need at least 1 USDC)');
-            throw new Error('Insufficient USDC balance on any chain (need at least 1 USDC)');
-          }
-
-          // USDC addresses per chain for routing
-          const USDC_ADDRESSES: Record<number, string> = {
-            1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',      // Ethereum
-            42161: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',  // Arbitrum (native)
-            10: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',     // Optimism (native)
-            137: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',    // Polygon (native)
-            8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',   // Base
-          };
-
-          // Pick a destination chain (different from source, prefer Arbitrum for low fees)
-          const destinationChains = [42161, 10, 137, 8453, 1].filter(c => c !== sourceBalance.chainId);
-          const toChain = destinationChains[0]; // First available different chain
-          const toChainName = { 1: 'Ethereum', 42161: 'Arbitrum', 10: 'Optimism', 137: 'Polygon', 8453: 'Base' }[toChain] || 'Unknown';
-
-          // Use actual balance (up to 1000 USDC max for safety)
-          const amountToUse = Math.min(sourceBalance.balanceFormatted, 1000);
-          const amountRaw = Math.floor(amountToUse * 1e6).toString();
-
-          addLog(agent.name, `✅ Using ${amountToUse.toFixed(2)} USDC from ${sourceBalance.chainName}`);
-
-          addLog(agent.name, `📝 Will bridge ${amountToUse.toFixed(2)} USDC`);
-          addLog(agent.name, `🛣️ Finding optimal route ${sourceBalance.chainName} → ${toChainName}...`);
-
-          // Log the exact parameters being sent
-          const fromTokenAddr = USDC_ADDRESSES[sourceBalance.chainId] || sourceBalance.tokenAddress;
-          const toTokenAddr = USDC_ADDRESSES[toChain];
-          addLog(agent.name, `   📋 From: Chain ${sourceBalance.chainId}, Token ${fromTokenAddr.slice(0, 10)}...`);
-          addLog(agent.name, `   📋 To: Chain ${toChain}, Token ${toTokenAddr.slice(0, 10)}...`);
-          addLog(agent.name, `   📋 Amount: ${amountRaw} (${amountToUse.toFixed(2)} USDC)`);
-          addLog(agent.name, `   📋 Wallet: ${walletAddress.slice(0, 10)}...`);
-          await new Promise(r => setTimeout(r, 300));
-
-          const executionPlan = await prepareExecution({
-            fromChain: sourceBalance.chainId,
-            toChain: toChain,
-            fromToken: fromTokenAddr,
-            toToken: toTokenAddr,
-            fromAmount: amountRaw,
-            fromAddress: walletAddress,
-          });
-
           const summary_exec = getExecutionSummary(executionPlan);
 
+          // Skip execution UI when we already have result (same-chain, auto-executed, or pending sign)
+          if (result?.status !== 'SAME_CHAIN' && result?.status !== 'READY_TO_SIGN' && result?.status !== 'SWITCH_CHAIN' && result?.status !== 'EXECUTED' && result?.status !== 'ERROR') {
           // Log warnings if no route found
-          if (executionPlan.warnings.length > 0 && !executionPlan.readyToExecute) {
+          if (executionPlan.warnings?.length > 0 && !executionPlan.readyToExecute) {
             addLog(agent.name, `⚠️ Route issue: ${executionPlan.warnings[0]}`);
+            // Provide helpful context for common errors
+            if (executionPlan.warnings[0]?.includes('Something went wrong')) {
+              addLog(agent.name, `\n💡 This usually means:`);
+              addLog(agent.name, `   • Amount too low - most bridges need $5-25+ minimum`);
+              addLog(agent.name, `   • No liquidity - try a different destination chain`);
+              addLog(agent.name, `   • Token not supported on destination chain`);
+              addLog(agent.name, `\n   Your amount: $${amountValueUSD.toFixed(2)} ${sourceBalance.tokenSymbol}`);
+            }
           }
 
           if (executionPlan.steps.length > 0) {
@@ -857,8 +1521,40 @@ const App: React.FC = () => {
           addLog(agent.name, `⛽ Estimated gas: ${summary_exec.gasCost}`);
           addLog(agent.name, `💵 Expected output: $${executionPlan.estimatedOutputUSD.toFixed(2)}`);
 
-          // AUTO-EXECUTE if wallet is connected and route is ready
-          if (walletClient && executionPlan.readyToExecute && executionPlan.quote) {
+          // VAULT DEPOSIT: Require user confirmation (sign step) - do NOT auto-execute
+          if (isVaultDeposit && walletClient && executionPlan.readyToExecute && executionPlan.quote) {
+            addLog(agent.name, '🔐 Route ready. Waiting for your confirmation to sign...');
+            toast.info('Vault deposit ready—review and click EXECUTE to sign', { autoClose: 8000 });
+            setPendingExecution({
+              type: 'vault_deposit',
+              quote: executionPlan.quote,
+              summary: `Deposit ${amountToUse.toFixed(4)} ${sourceBalance.tokenSymbol} into Aave V3 on Arbitrum from ${sourceBalance.chainName}`,
+              estimatedOutput: `$${executionPlan.estimatedOutputUSD.toFixed(2)}`,
+              gasCost: summary_exec.gasCost,
+            });
+            agentChatRef.current?.appendMessage({
+              type: 'agent',
+              content: `${agent.name}: ✅ Vault deposit route ready. A confirmation modal will appear—review the details and click EXECUTE to sign with your wallet.`,
+              agentName: agent.name,
+            });
+            result = {
+              type: 'cross_chain_swap',
+              route: summary_exec.route,
+              status: 'READY_TO_SIGN',
+              estimatedTime: summary_exec.estimatedTime,
+              gasCost: summary_exec.gasCost,
+              netValue: summary_exec.netValue,
+              estimatedOutput: `$${executionPlan.estimatedOutputUSD.toFixed(2)}`,
+              steps: executionPlan.steps.map(s => `${s.stepNumber}. ${s.type} via ${s.tool} (${s.fromChain}→${s.toChain})`),
+              warnings: [],
+              readyToExecute: true,
+              walletConnected: true,
+              note: 'Review the confirmation modal and click EXECUTE to sign.',
+            };
+            taskType = executionTaskType;
+            summary = `✅ Route ready. Sign the transaction in the confirmation modal to complete vault deposit.`;
+          } else if (!isVaultDeposit && walletClient && executionPlan.readyToExecute && executionPlan.quote) {
+          // AUTO-EXECUTE for non-vault (bridge only) - same as before
             addLog(agent.name, '🔐 Wallet detected! Initiating auto-execution...');
             await new Promise(r => setTimeout(r, 300));
             addLog(agent.name, '📤 Sending transaction to wallet for signature...');
@@ -915,14 +1611,14 @@ const App: React.FC = () => {
               });
 
               // Add success message to chat
-              const successMessage = {
-                id: `msg_${Date.now()}_exec_success`,
-                type: 'agent' as const,
-                content: `${agent.name}: ✅ Transaction complete! Bridged ${amountToUse.toFixed(2)} USDC from ${sourceBalance.chainName} → ${toChainName}. TX: ${txHash.slice(0, 10)}...`,
-                timestamp: Date.now(),
+              const successContent = isVaultDeposit
+                ? `${agent.name}: ✅ Transaction complete! Deposited ${amountToUse.toFixed(4)} ${sourceBalance.tokenSymbol} into Aave V3 on Arbitrum from ${sourceBalance.chainName}. TX: ${txHash.slice(0, 10)}...`
+                : `${agent.name}: ✅ Transaction complete! Bridged ${amountToUse.toFixed(4)} ${sourceBalance.tokenSymbol} from ${sourceBalance.chainName} → ${toChainName}. TX: ${txHash.slice(0, 10)}...`;
+              agentChatRef.current?.appendMessage({
+                type: 'agent',
+                content: successContent,
                 agentName: agent.name
-              };
-              agentChatRef.current?.appendMessage(successMessage);
+              });
 
               result = {
                 type: 'cross_chain_swap',
@@ -939,31 +1635,99 @@ const App: React.FC = () => {
                 walletConnected: true,
                 note: `✅ Transaction executed! Hash: ${txHash}`
               };
-              taskType = 'cross_chain_swap';
-              summary = `✅ EXECUTED! ${amountToUse.toFixed(2)} USDC bridged ${sourceBalance.chainName} → ${toChainName}. TX: ${txHash.slice(0, 10)}...`;
+              taskType = executionTaskType;
+              summary = `✅ EXECUTED! ${amountToUse.toFixed(4)} ${sourceBalance.tokenSymbol} bridged ${sourceBalance.chainName} → ${toChainName}. TX: ${txHash.slice(0, 10)}...`;
 
             } catch (execError: any) {
               console.error('Auto-execution error:', execError);
-              addLog(agent.name, `❌ Transaction failed: ${execError.message}`);
-              toast.error(`Execution failed: ${execError.message}`);
+              // SDK may throw but still have submitted a tx - extract txHash from error
+              const errTxHash = execError?.transactionHash || execError?.txHash
+                || execError?.receipt?.transactionHash || execError?.cause?.transactionHash
+                || execError?.data?.transactionHash;
+              const isBalanceTooLow = /balance.*too low|too low/i.test(execError?.message || '');
+              let verifiedOnChain = false;
 
-              // Update transaction in history as failed
-              txHistoryService.updateTransaction(pendingTx.id, {
-                status: 'failed',
-                error: execError.message,
-              });
+              if (errTxHash) {
+                // Verify on-chain - transaction may have succeeded despite SDK throw
+                try {
+                  const routeStatus = await lifiService.getStatus(errTxHash, undefined, sourceBalance.chainId, toChain);
+                  if (routeStatus?.status === 'DONE') {
+                    verifiedOnChain = true;
+                    addLog(agent.name, `✅ Transaction verified on-chain! Hash: ${errTxHash.slice(0, 10)}...`);
+                    toast.success('Transaction verified on-chain!');
+                    const EXPLORER_URLS: Record<number, string> = {
+                      1: 'https://etherscan.io/tx/',
+                      42161: 'https://arbiscan.io/tx/',
+                      10: 'https://optimistic.etherscan.io/tx/',
+                      137: 'https://polygonscan.com/tx/',
+                      8453: 'https://basescan.org/tx/',
+                    };
+                    txHistoryService.updateTransaction(pendingTx.id, {
+                      status: 'completed',
+                      txHash: errTxHash,
+                      toAmount: executionPlan.estimatedOutputUSD.toFixed(2),
+                      toAmountUsd: executionPlan.estimatedOutputUSD,
+                      explorerUrl: `${EXPLORER_URLS[toChain] || 'https://etherscan.io/tx/'}${errTxHash}`,
+                    });
+                    result = {
+                      type: 'cross_chain_swap',
+                      route: summary_exec.route,
+                      status: 'EXECUTED',
+                      transactionHash: errTxHash,
+                      estimatedTime: summary_exec.estimatedTime,
+                      gasCost: summary_exec.gasCost,
+                      netValue: summary_exec.netValue,
+                      estimatedOutput: `$${executionPlan.estimatedOutputUSD.toFixed(2)}`,
+                      steps: executionPlan.steps.map(s => `${s.stepNumber}. ${s.type} via ${s.tool} (${s.fromChain}→${s.toChain})`),
+                      warnings: [],
+                      readyToExecute: true,
+                      walletConnected: true,
+                      note: `✅ Transaction verified on-chain! Hash: ${errTxHash.slice(0, 10)}...`
+                    };
+                    taskType = executionTaskType;
+                    summary = `✅ Verified on-chain! Bridged ${amountToUse.toFixed(4)} ${sourceBalance.tokenSymbol} ${sourceBalance.chainName} → ${toChainName}. TX: ${errTxHash.slice(0, 10)}...`;
+                    agentChatRef.current?.appendMessage({
+                      type: 'agent',
+                      content: `${agent.name}: ✅ Transaction verified on-chain! Bridged ${amountToUse.toFixed(4)} ${sourceBalance.tokenSymbol}. TX: ${errTxHash.slice(0, 10)}...`,
+                      agentName: agent.name
+                    });
+                  } else {
+                    throw new Error(execError.message);
+                  }
+                } catch (_) {
+                  // Verification failed, fall through to normal error handling
+                }
+              }
 
-              result = {
-                type: 'cross_chain_swap',
-                route: summary_exec.route,
-                status: 'EXECUTION_FAILED',
-                estimatedTime: summary_exec.estimatedTime,
-                gasCost: summary_exec.gasCost,
-                error: execError.message,
-                note: `Execution failed: ${execError.message}`
-              };
-              taskType = 'cross_chain_swap';
-              summary = `❌ Execution failed: ${execError.message}`;
+              if (!verifiedOnChain) {
+                let hint = '';
+                if (isBalanceTooLow) {
+                  hint = ` This usually means one of:\n` +
+                    `   1. ${sourceBalance.tokenSymbol} balance (${amountToUse.toFixed(4)}) is below bridge minimum\n` +
+                    `   2. Not enough ETH for gas on ${sourceBalance.chainName}\n` +
+                    `   3. Quote expired - try again with smaller amount`;
+                }
+                addLog(agent.name, `❌ Transaction failed: ${execError.message}`);
+                if (hint) addLog(agent.name, hint);
+                toast.error(`Execution failed: ${execError.message}`);
+
+                txHistoryService.updateTransaction(pendingTx.id, {
+                  status: 'failed',
+                  error: execError.message,
+                });
+
+                result = {
+                  type: 'cross_chain_swap',
+                  route: summary_exec.route,
+                  status: 'EXECUTION_FAILED',
+                  estimatedTime: summary_exec.estimatedTime,
+                  gasCost: summary_exec.gasCost,
+                  error: execError.message,
+                  note: `Execution failed: ${execError.message}`
+                };
+                taskType = executionTaskType;
+                summary = `❌ Execution failed: ${execError.message}`;
+              }
             }
           } else if (!walletClient) {
             addLog(agent.name, '⚠️ No wallet connected - cannot execute');
@@ -981,7 +1745,7 @@ const App: React.FC = () => {
               walletConnected: false,
               note: 'Connect your wallet to execute this route'
             };
-            taskType = 'cross_chain_swap';
+            taskType = executionTaskType;
             summary = `⚠️ Route prepared but wallet not connected. Connect MetaMask to execute.`;
           } else {
             result = {
@@ -997,8 +1761,9 @@ const App: React.FC = () => {
               readyToExecute: executionPlan.readyToExecute,
               note: executionPlan.warnings[0] || 'Route not ready'
             };
-            taskType = 'cross_chain_swap';
+            taskType = executionTaskType;
             summary = `⚠️ Route not ready: ${executionPlan.warnings[0] || 'Check route parameters'}`;
+          }
           }
         } catch (error: any) {
           console.error('Route preparation error:', error);
@@ -1008,8 +1773,10 @@ const App: React.FC = () => {
             status: 'ERROR',
             error: error.message
           };
-          taskType = 'cross_chain_swap';
+          const tl = (taskDescription || '').toLowerCase();
+          taskType = (tl.includes('yield') || tl.includes('apy') || tl.includes('earn') || tl.includes('stake') || tl.includes('lend')) ? 'yield_deposit' : 'cross_chain_swap';
           summary = `Route preparation failed: ${error.message}`;
+        }
         }
       } else {
         // Route Strategist - Strategic coordination
@@ -1073,20 +1840,39 @@ const App: React.FC = () => {
   const handleRunAgentPipeline = useCallback(
     async (intentType: string, userMessage?: string): Promise<{ success: boolean; summary: string; agentOutputs: Record<string, string> }> => {
       const { parseIntent } = await import('./services/intentParser');
-      const canonical: Record<string, string> = { yield_optimization: 'find best yield', arbitrage: 'find arbitrage', rebalancing: 'rebalance portfolio', portfolio_check: 'check my balance', swap: 'swap usdc', monitoring: 'monitor positions', general: 'optimize my funds' };
+      const canonical: Record<string, string> = {
+  yield_optimization: 'find best yield',
+  arbitrage: 'find arbitrage',
+  rebalancing: 'rebalance portfolio',
+  portfolio_check: 'check my balance',
+  swap: 'swap usdc',
+  vault_deposit: 'deposit USDC into Aave on Arbitrum',
+  hedge: 'hedge my ETH exposure',
+  borrow: 'borrow USDC against my Aave collateral',
+  staged_strategy: 'deposit 100 USDC in 3 steps over 2 weeks',
+  monitoring: 'monitor positions',
+  general: 'optimize my funds',
+};
       const intent = parseIntent(userMessage || canonical[intentType] || intentType);
       const agentOrder = intent.requiredAgents.filter((id) => id !== 'a0'); // Skip Commander for now; run specialists first
       if (intent.requiredAgents.includes('a0')) {
         agentOrder.unshift('a0'); // Paul Atreides leads
       }
       const agentOutputs: Record<string, string> = {};
+      const previousResults: Record<string, any> = {};
       const taskDescription = userMessage || intent.description;
       for (const agentId of agentOrder) {
         try {
-          const result = await executeAgentTask(agentId, taskDescription);
+          const result = await executeAgentTask(agentId, taskDescription, {
+            intentType: intent.intentType,
+            previousResults: { ...previousResults },
+          });
           if (result?.summary) {
             const agent = AGENTS.find((a) => a.id === agentId);
             agentOutputs[agent?.name || agentId] = result.summary;
+          }
+          if (result?.data) {
+            previousResults[agentId] = result.data;
           }
         } catch (e) {
           const agent = AGENTS.find((a) => a.id === agentId);
@@ -1101,12 +1887,18 @@ const App: React.FC = () => {
     [executeAgentTask]
   );
 
+  // Swap executed callback (from agent executeSwap tool)
+  const handleSwapExecuted = useCallback((txHash: string, summary: string) => {
+    toast.success(`Swap executed! TX: ${txHash.slice(0, 10)}...`);
+  }, []);
+
   // Agent chat (Vercel AI SDK with LI.FI/DeFi tools)
   const agentChat = useAgentChat(
     getWalletAddressForAgents(),
     walletClient ?? undefined,
     handleDeployAgents,
-    handleRunAgentPipeline
+    handleRunAgentPipeline,
+    handleSwapExecuted
   );
   agentChatRef.current = agentChat;
 
@@ -1121,12 +1913,32 @@ const App: React.FC = () => {
     addLog(AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar', '⚡ EXECUTING! Signing transaction with your wallet...');
 
     try {
-      const { lifiService } = await import('./services/lifi');
+      let txHash: string;
+      if (pendingExecution.type === 'direct_aave' && pendingExecution.directAaveParams) {
+        const params = pendingExecution.directAaveParams;
+        if (walletClient.chain?.id !== params.chainId && typeof window !== 'undefined' && (window as any).ethereum) {
+          addLog(AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar', `🔄 Switching your wallet to chain ${params.chainId}...`);
+          const hexChainId = '0x' + params.chainId.toString(16);
+          await (window as any).ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hexChainId }] });
+          await new Promise(r => setTimeout(r, 1500));
+        }
+        const { executeDirectAaveDeposit } = await import('./services/directAaveDeposit');
+        addLog(AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar', '📝 Approving USDC and depositing into Aave...');
+        const depositResult = await executeDirectAaveDeposit(
+          { ...params, skipChainCheck: walletClient.chain?.id !== params.chainId },
+          walletClient
+        );
+        if (!depositResult.success) {
+          throw new Error(depositResult.error || 'Deposit failed');
+        }
+        txHash = depositResult.txHash || 'pending';
+      } else {
+        const { lifiService } = await import('./services/lifi');
+        const result = await lifiService.executeRoute(pendingExecution.quote!, walletClient);
+        txHash = result.transactionHash || result.hash || 'pending';
+      }
 
-      // Execute the route with wallet client
-      const result = await lifiService.executeRoute(pendingExecution.quote, walletClient);
-
-      addLog(AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar', `✅ Transaction submitted! Hash: ${result.transactionHash || result.hash || 'pending'}`);
+      addLog(AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar', `✅ Transaction submitted! Hash: ${txHash}`);
       toast.success('Transaction submitted! Check your wallet for confirmation.');
 
       // Clear pending execution
@@ -1135,7 +1947,7 @@ const App: React.FC = () => {
       // Add success message to chat
       agentChatRef.current?.appendMessage({
         type: 'agent',
-        content: `${AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar'}: ✅ Transaction executed successfully! ${pendingExecution.summary}. TX hash: ${(result.transactionHash || result.hash || 'pending').slice(0, 10)}...`,
+        content: `${AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar'}: ✅ Transaction executed successfully! ${pendingExecution.summary}. TX hash: ${txHash.slice(0, 10)}...`,
         agentName: AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar'
       });
 
@@ -1309,17 +2121,6 @@ const App: React.FC = () => {
               INTENT CHAT
             </button>
             <button
-              onClick={() => setRightPanelView('operations')}
-              className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'operations'
-                ? 'bg-green-500/10 text-green-400 border-b-2 border-green-400'
-                : 'text-gray-400 hover:text-white hover:bg-white/5'
-                }`}
-              title="View operations & agent status"
-            >
-              <Activity size={14} />
-              OPS
-            </button>
-            <button
               onClick={() => setRightPanelView('yield')}
               className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'yield'
                 ? 'bg-spice-orange/10 text-spice-orange border-b-2 border-spice-orange'
@@ -1342,7 +2143,7 @@ const App: React.FC = () => {
             <button
               onClick={() => setRightPanelView('alerts')}
               className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'alerts'
-                ? 'bg-orange-500/10 text-orange-400 border-b-2 border-orange-400'
+                ? 'bg-spice-orange/10 text-spice-orange border-b-2 border-spice-orange'
                 : 'text-gray-400 hover:text-white hover:bg-white/5'
                 }`}
             >
@@ -1383,20 +2184,7 @@ const App: React.FC = () => {
 
           {/* Panel Content - Takes remaining space */}
           <div className="flex-1 min-h-0 overflow-hidden">
-            {rightPanelView === 'operations' ? (
-              <div className="h-full overflow-y-auto flex flex-col">
-                <OperationsDashboard
-                  agents={AGENTS}
-                  results={taskResults}
-                  onBack={() => setRightPanelView('chat')}
-                  activeAgents={activeAgents}
-                  agentConnections={persistentEdges}
-                  agentStatuses={agentStatuses}
-                  logs={logs}
-                  embedded
-                />
-              </div>
-            ) : rightPanelView === 'chat' ? (
+            {rightPanelView === 'chat' ? (
               <IntentChat
                 onIntentSubmit={agentChat.submit}
                 messages={agentChat.messages}
@@ -1559,7 +2347,7 @@ const App: React.FC = () => {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-400 text-sm">Gas Cost</span>
-                <span className="text-orange-400 font-mono text-sm">{pendingExecution.gasCost}</span>
+                <span className="text-spice-orange font-mono text-sm">{pendingExecution.gasCost}</span>
               </div>
             </div>
 

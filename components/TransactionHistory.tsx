@@ -52,7 +52,7 @@ const TYPE_COLORS: Record<TransactionType, string> = {
   swap: 'text-yellow-400',
   approval: 'text-gray-400',
   deposit: 'text-green-400',
-  withdraw: 'text-orange-400',
+  withdraw: 'text-spice-orange',
 };
 
 export const TransactionHistory: React.FC<TransactionHistoryProps> = ({ onLog }) => {
@@ -248,7 +248,7 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({ onLog })
             <p className="text-xs text-gray-400">Profit</p>
           </div>
           <div className="text-center">
-            <p className="text-lg font-bold text-orange-400">{formatUsd(stats.totalGasCostUsd)}</p>
+            <p className="text-lg font-bold text-spice-orange">{formatUsd(stats.totalGasCostUsd)}</p>
             <p className="text-xs text-gray-400">Gas</p>
           </div>
         </div>
@@ -376,7 +376,7 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({ onLog })
                     )}
 
                     {tx.gasCostUsd && (
-                      <p className="text-xs text-orange-400/70">
+                      <p className="text-xs text-spice-orange/70">
                         <Fuel size={10} className="inline mr-1" />
                         {formatUsd(tx.gasCostUsd)}
                       </p>

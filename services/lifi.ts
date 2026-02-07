@@ -4,12 +4,11 @@
 // Docs: https://docs.li.fi/sdk/overview
 
 import { LiFi, Route, Chain, Token, convertQuoteToRoute } from '@lifi/sdk';
+import { BrowserProvider } from 'ethers';
 import type { LifiStep, TokenAmount } from '@lifi/types';
 import { LIFI_INTEGRATOR } from '../constants';
 import {
-  canUseArcRoute,
   getArcTransferInfo,
-  formatArcLog,
   arcStats,
   ArcTransferInfo,
   ARC_SUPPORTED_CHAINS,
@@ -17,11 +16,11 @@ import {
 
 // RPC endpoints for balance queries (with fallbacks - more reliable endpoints first)
 const RPC_URLS: Record<number, string[]> = {
-  1: ['https://rpc.ankr.com/eth', 'https://eth.drpc.org', 'https://1rpc.io/eth', 'https://cloudflare-eth.com'],
+  1: ['https://eth.drpc.org', 'https://1rpc.io/eth', 'https://cloudflare-eth.com', 'https://rpc.ankr.com/eth'],
   42161: ['https://arb1.arbitrum.io/rpc', 'https://rpc.ankr.com/arbitrum'],
   10: ['https://mainnet.optimism.io', 'https://rpc.ankr.com/optimism'],
   137: ['https://polygon-rpc.com', 'https://rpc.ankr.com/polygon'],
-  8453: ['https://mainnet.base.org', 'https://rpc.ankr.com/base'],
+  8453: ['https://base.llamarpc.com', 'https://1rpc.io/base', 'https://mainnet.base.org'],
   43114: ['https://api.avax.network/ext/bc/C/rpc', 'https://rpc.ankr.com/avalanche'],
 };
 
@@ -89,6 +88,16 @@ async function getERC20BalanceDirect(
   return '0';
 }
 
+// LI.FI rate limits: Unauthenticated = 200 req/2hr (~36s between). Authenticated = 200 req/min.
+// Use direct import.meta.env.VITE_* so Vite can replace at build time
+const LIFI_API_KEY: string | undefined = import.meta.env.VITE_LIFI_API_KEY;
+const MIN_QUOTE_INTERVAL_MS = LIFI_API_KEY ? 5000 : 40000; // 5s with key, 40s without (stay under 200/2hr)
+
+// Startup log to verify API key is loaded (restart dev server after adding to .env)
+if (typeof window !== 'undefined') {
+  console.log('[LI.FI] API key:', LIFI_API_KEY ? 'configured (5s interval)' : 'not set (40s interval) — add VITE_LIFI_API_KEY to .env and restart');
+}
+
 // Initialize SDK with LiFi class (SDK v2.x API) and RPC config
 // Note: integrator name must be max 23 characters (alphanumeric, -, _, .)
 // SDK uses singleton ConfigService - import lifi.ts first in index.tsx to set integrator before any other module
@@ -99,7 +108,68 @@ Object.entries(RPC_URLS).forEach(([chainId, urls]) => {
 export const lifi = new LiFi({
   integrator: LIFI_INTEGRATOR,
   rpcs,
+  ...(LIFI_API_KEY ? { apiKey: LIFI_API_KEY } : {}),
 });
+
+// Global queue: only one quote request at a time to avoid 429
+let quoteQueue: Promise<void> = Promise.resolve();
+let lastQuoteTime = 0;
+
+async function acquireQuoteSlot(): Promise<() => void> {
+  const prev = quoteQueue;
+  let release: () => void;
+  quoteQueue = new Promise<void>((r) => { release = r; });
+  await prev;
+  const now = Date.now();
+  const elapsed = now - lastQuoteTime;
+  if (elapsed < MIN_QUOTE_INTERVAL_MS) {
+    const wait = MIN_QUOTE_INTERVAL_MS - elapsed;
+    console.log(`[LI.FI] Rate limit: waiting ${Math.round(wait / 1000)}s before next quote`);
+    await new Promise((r) => setTimeout(r, wait));
+  }
+  lastQuoteTime = Date.now();
+  return release!;
+}
+
+// Retry wrapper for API calls with exponential backoff + global queue
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 5000
+): Promise<T> {
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const release = await acquireQuoteSlot();
+      try {
+        const result = await fn();
+        return result;
+      } finally {
+        release();
+      }
+    } catch (error: any) {
+      lastError = error;
+      const errStr = JSON.stringify(error) + (error?.message || '') + (error?.name || '');
+      const is429 = errStr.includes('429') ||
+                    errStr.includes('Too Many Requests') ||
+                    errStr.includes('Something went wrong') ||
+                    errStr.includes('ServerError') ||
+                    error?.response?.status === 429 ||
+                    error?.status === 429;
+
+      console.log(`[LI.FI] Request failed (attempt ${attempt}/${maxRetries}):`, error?.message || error?.name || 'Unknown error');
+
+      if (is429 && attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt - 1);
+        console.log(`[LI.FI] Rate limited, retrying in ${delay}ms...`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError;
+}
 
 // Adapter: Convert viem WalletClient to ethers-compatible signer for LI.FI SDK
 // LI.FI SDK expects ethers-style signer with getAddress(), signMessage(), sendTransaction(), getChainId()
@@ -231,16 +301,46 @@ const CHAIN_NAMES: Record<number, string> = {
   43114: 'Avalanche',
 };
 
+// Fallback chain list when LI.FI API fails (CORS, network, etc.)
+const FALLBACK_CHAINS: Partial<Chain>[] = [
+  { id: 1, name: 'Ethereum', key: 'eth' },
+  { id: 42161, name: 'Arbitrum', key: 'arb' },
+  { id: 10, name: 'OP Mainnet', key: 'opt' },
+  { id: 137, name: 'Polygon', key: 'pol' },
+  { id: 8453, name: 'Base', key: 'bas' },
+  { id: 43114, name: 'Avalanche', key: 'ava' },
+];
+
 export const lifiService = {
-  // Get available chains
+  // Get available chains (SDK first, direct API fallback, then static fallback)
   async getChains(): Promise<Chain[]> {
     try {
       const chains = await lifi.getChains();
-      return chains;
+      if (Array.isArray(chains) && chains.length > 0) {
+        return chains;
+      }
     } catch (error) {
-      console.error('Error fetching chains:', error);
-      return [];
+      console.warn('[LI.FI] SDK getChains failed, trying direct API:', error);
     }
+
+    // Fallback: fetch directly from LI.FI API (avoids SDK ChainsService init race)
+    try {
+      const res = await fetch('https://li.quest/v1/chains', { method: 'GET' });
+      if (res.ok) {
+        const data = await res.json();
+        const chains = data?.chains;
+        if (Array.isArray(chains) && chains.length > 0) {
+          console.log('[LI.FI] Chains loaded via direct API:', chains.length);
+          return chains;
+        }
+      }
+    } catch (fetchError) {
+      console.warn('[LI.FI] Direct API fetch failed:', fetchError);
+    }
+
+    // Static fallback so app always has chains
+    console.warn('[LI.FI] Using static chain fallback');
+    return FALLBACK_CHAINS as Chain[];
   },
 
   // Get available tokens for a chain
@@ -365,6 +465,54 @@ export const lifiService = {
     return balances;
   },
 
+  // Get native token (ETH, MATIC, etc.) balance for gas on a chain
+  async getNativeBalance(walletAddress: string, chainId: number): Promise<{ balance: string; balanceFormatted: number }> {
+    const rpcUrls = RPC_URLS[chainId] || ['https://rpc.ankr.com/eth', 'https://eth.drpc.org', 'https://1rpc.io/eth'];
+    const normalizedWallet = walletAddress.toLowerCase();
+    const chainName = CHAIN_NAMES[chainId] || `Chain ${chainId}`;
+
+    console.log(`[LI.FI] Fetching native balance for ${chainName}...`);
+
+    for (const rpcUrl of rpcUrls) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
+        const response = await fetch(rpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: Date.now(),
+            method: 'eth_getBalance',
+            params: [normalizedWallet, 'latest']
+          }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        const result = await response.json();
+        if (result.error) {
+          console.warn(`[LI.FI] RPC error from ${rpcUrl}:`, result.error);
+          continue;
+        }
+        if (!result.result || result.result === '0x0' || result.result === '0x') {
+          console.log(`[LI.FI] Zero balance from ${rpcUrl} for ${chainName}`);
+          return { balance: '0', balanceFormatted: 0 };
+        }
+        const balance = BigInt(result.result).toString();
+        const balanceFormatted = parseFloat(balance) / 1e18;
+        console.log(`[LI.FI] ✅ ${chainName} native: ${balanceFormatted} (from ${rpcUrl})`);
+        return { balance, balanceFormatted };
+      } catch (err: any) {
+        console.warn(`[LI.FI] RPC failed (${rpcUrl}):`, err?.message || err);
+        continue;
+      }
+    }
+    console.error(`[LI.FI] All RPCs failed for ${chainName} native balance`);
+    return { balance: '0', balanceFormatted: 0 };
+  },
+
   // Get all token balances for a wallet on a specific chain
   async getWalletBalances(walletAddress: string, chainId: number): Promise<WalletTokenBalance[]> {
     try {
@@ -399,6 +547,35 @@ export const lifiService = {
     }
   },
 
+  // Get quote for cross-chain contract call (bridge + destination call in one tx)
+  // Used for: bridge USDC from any chain → deposit into Aave on Arbitrum
+  // Docs: https://docs.li.fi/sdk/request-routes#request-contract-call-quote
+  async getContractCallsQuote(request: {
+    fromAddress: string;
+    fromChain: number;
+    fromToken: string;
+    toChain: number;
+    toToken: string;
+    toAmount: string;
+    contractCalls: Array<{
+      fromAmount: string;
+      fromTokenAddress: string;
+      toContractAddress: string;
+      toContractCallData: string;
+      toContractGasLimit: string;
+      toApprovalAddress?: string;
+      contractOutputsToken?: string;
+    }>;
+  }): Promise<LifiStep | null> {
+    try {
+      const quote = await lifi.getContractCallsQuote(request as any);
+      return quote || null;
+    } catch (error: any) {
+      console.error('[LI.FI] getContractCallsQuote error:', error);
+      throw new Error(error?.message || 'Contract call quote failed');
+    }
+  },
+
   // Get quote for cross-chain swap (returns LifiStep - single best route with tx data)
   // For USDC transfers: ALWAYS prefer Circle CCTP (Arc's underlying protocol)
   async getQuote(params: LifiQuoteParams): Promise<LifiStep | null> {
@@ -408,6 +585,7 @@ export const lifiService = {
 
   // Get quote with Arc routing information
   // Returns both the quote and Arc metadata for UI display
+  // Uses standard LI.FI routing only (1 request) - LI.FI picks best route including CCTP when available
   async getQuoteWithArcInfo(params: LifiQuoteParams): Promise<LifiQuoteResult | null> {
     try {
       console.log('[LI.FI] Requesting quote with params:', {
@@ -420,72 +598,18 @@ export const lifiService = {
         toAddress: params.toAddress,
       });
 
-      // Check if this route can use Arc (CCTP for native USDC)
-      const canUseArc = canUseArcRoute(
-        params.fromChain,
-        params.toChain,
-        params.fromToken,
-        params.toToken
-      );
+      // Use standard LI.FI routing - single request, LI.FI picks best route (may include CCTP for USDC)
+      const quote = await withRetry(() => lifi.getQuote({
+        fromChain: params.fromChain,
+        toChain: params.toChain,
+        fromToken: params.fromToken,
+        toToken: params.toToken,
+        fromAmount: params.fromAmount,
+        fromAddress: params.fromAddress,
+        toAddress: params.toAddress,
+      }));
 
-      let quote: LifiStep | null = null;
-      let bridgeUsed: string | undefined;
-
-      // For small USDC (< 10), try standard routing first (some bridges have lower minimums)
-      const amountNum = parseFloat(params.fromAmount) / 1e6;
-      const isSmallUsdc = canUseArc && amountNum < 10;
-
-      // For Arc-eligible routes, prefer Circle CCTP (unless small amount - try all bridges first)
-      if (canUseArc && !isSmallUsdc) {
-        console.log('[LI.FI] ⚡ Arc-eligible route detected - using Circle CCTP for native USDC');
-        console.log(formatArcLog(getArcTransferInfo(
-          params.fromChain,
-          params.toChain,
-          params.fromToken,
-          params.toToken,
-          'circlecctp'
-        )));
-
-        try {
-          // Try Circle CCTP first (Arc's underlying protocol)
-          quote = await lifi.getQuote({
-            fromChain: params.fromChain,
-            toChain: params.toChain,
-            fromToken: params.fromToken,
-            toToken: params.toToken,
-            fromAmount: params.fromAmount,
-            fromAddress: params.fromAddress,
-            toAddress: params.toAddress,
-            // Force Circle CCTP bridge for USDC - this uses Arc's burn/mint mechanism
-            allowBridges: ['circlecctp', 'circle'],
-          });
-
-          if (quote) {
-            bridgeUsed = 'circlecctp';
-            console.log('[LI.FI] ✅ Arc/CCTP quote received - native USDC burn/mint route');
-          }
-        } catch (cctpError) {
-          console.warn('[LI.FI] ⚠️ Arc/CCTP not available for this route, falling back to best route');
-        }
-      }
-
-      // Fallback: use standard LI.FI routing (for non-USDC or if CCTP unavailable)
-      if (!quote) {
-        quote = await lifi.getQuote({
-          fromChain: params.fromChain,
-          toChain: params.toChain,
-          fromToken: params.fromToken,
-          toToken: params.toToken,
-          fromAmount: params.fromAmount,
-          fromAddress: params.fromAddress,
-          toAddress: params.toAddress,
-        });
-
-        // Try to extract bridge used from quote
-        if (quote) {
-          bridgeUsed = (quote as any).toolDetails?.name || (quote as any).tool;
-        }
-      }
+      const bridgeUsed = quote ? ((quote as any).toolDetails?.name || (quote as any).tool) : undefined;
 
       if (!quote) {
         console.log('[LI.FI] No quote available');
@@ -523,8 +647,24 @@ export const lifiService = {
         errMsg = data?.message || data?.error || data?.msg || errMsg;
       }
       if (error?.cause?.message) errMsg = error.cause.message;
+
+      // Context-aware hints for generic errors
       if (errMsg === 'Something went wrong' || errMsg === 'Unknown error') {
-        errMsg += ' — Try ≥10 USDC (bridges often need 10–25+ USDC) or verify wallet balance';
+        const is429 = error?.status === 429 || error?.response?.status === 429 ||
+          String(error).includes('429') || String(error?.cause).includes('429');
+        if (is429 || !LIFI_API_KEY) {
+          errMsg += ' — Likely rate limited (200 req/2hr without API key). Add VITE_LIFI_API_KEY to .env and restart dev server for 200 req/min.';
+        } else {
+          const amountNum = parseFloat(params.fromAmount) / 1e6; // USDC decimals
+          const isSameChain = params.fromChain === params.toChain;
+          if (isSameChain && amountNum < 5) {
+            errMsg += ' — For same-chain swaps, try 5+ USDC. Small amounts can fail due to liquidity or routing.';
+          } else if (!isSameChain && amountNum < 10) {
+            errMsg += ' — Cross-chain bridges often need 10–25+ USDC. Try a larger amount.';
+          } else {
+            errMsg += ' — Try a different amount or verify wallet balance.';
+          }
+        }
       }
       throw new Error(`LI.FI quote failed: ${errMsg}`);
     }
@@ -561,8 +701,31 @@ export const lifiService = {
       // Cast to 'any' to bypass strict type checking - we implement only the methods LI.FI actually uses
       const signer = createViemToEthersSigner(walletClient) as any;
 
+      // Get provider for chain switching - required when route starts on a different chain than wallet
+      const ethereum = typeof window !== 'undefined' ? (window as any).ethereum : undefined;
+
+      const execSettings = {
+        ...settings,
+        switchChainHook: ethereum
+          ? async (chainId: number) => {
+              console.log('[LI.FI] Switching chain to', chainId);
+              await ethereum.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: '0x' + chainId.toString(16) }],
+              });
+              const provider = new BrowserProvider(ethereum);
+              const signer = await provider.getSigner();
+              // SDK expects getChainId() - ensure it returns number (ethers v6 returns bigint)
+              return Object.assign(signer, {
+                getChainId: async () => Number(chainId),
+              }) as any;
+            }
+          : undefined,
+        acceptExchangeRateUpdateHook: async () => true,
+      };
+
       console.log('[LI.FI] Executing route with adapted signer...');
-      const result = await lifi.executeRoute(signer, route, settings);
+      const result = await lifi.executeRoute(signer, route, execSettings);
       return result;
     } catch (error) {
       console.error('Error executing route:', error);

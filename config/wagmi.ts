@@ -39,7 +39,7 @@ export const wagmiConfig = createConfig({
     [arbitrum.id]: http('https://arb1.arbitrum.io/rpc'),
     [optimism.id]: http('https://mainnet.optimism.io'),
     [polygon.id]: http('https://polygon-rpc.com'),
-    [base.id]: http('https://mainnet.base.org'),
+    [base.id]: http('https://base.llamarpc.com'),
     [avalanche.id]: http('https://api.avax.network/ext/bc/C/rpc'),
     [mantleTestnet.id]: http('https://rpc.testnet.mantle.xyz'),
   },

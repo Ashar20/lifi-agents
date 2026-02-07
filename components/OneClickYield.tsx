@@ -2,7 +2,7 @@
 // Real cross-chain yield optimization with wallet signing and auto-monitoring
 // Uses Arc (Circle CCTP) as liquidity hub for native USDC cross-chain transfers
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAccount, useWalletClient, useChainId } from 'wagmi';
 import {
   Zap,
@@ -50,6 +50,8 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
   const { address, isConnected, connector } = useAccount();
   const { data: walletClient } = useWalletClient();
   const chainId = useChainId();
+  const onLogRef = useRef(onLog);
+  onLogRef.current = onLog;
   
   // Detect which wallet is being used
   const [walletName, setWalletName] = useState<string>('');
@@ -60,12 +62,11 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
         (typeof window !== 'undefined' && (window as any).ethereum?.isMetaMask ? 'MetaMask' : 
          'Browser Wallet');
       setWalletName(detectedName);
-      onLog?.(`🔗 Connected wallet: ${detectedName}`, 'info');
-      
+      onLogRef.current?.(`🔗 Connected wallet: ${detectedName}`, 'info');
     } else if (!isConnected) {
       setWalletName('');
     }
-  }, [isConnected, walletClient, connector, onLog]);
+  }, [isConnected, walletClient, connector]);
   
   // State
   const [viewMode, setViewMode] = useState<ViewMode>('overview');
@@ -90,12 +91,12 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
   const [checkInterval, setCheckInterval] = useState(60);
   const [showSettings, setShowSettings] = useState(false);
   
-  // Initialize auto-monitor callbacks
+  // Initialize auto-monitor callbacks (run once on mount to avoid infinite loop from onLog changing)
   useEffect(() => {
     autoYieldMonitor.setCallbacks(
       (status, type) => {
         setStatusMessage(status);
-        onLog?.(status, type as any);
+        onLogRef.current?.(status, type as any);
       },
       (state) => {
         setMonitorState(state);
@@ -109,14 +110,13 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
       }
     );
     
-    // Load initial state
-    setMonitorState(autoYieldMonitor.getState());
     const config = autoYieldMonitor.getConfig();
     setMinApyImprovement(config.minApyImprovement);
     setMaxGasCost(config.maxGasCost);
     setMinPositionValue(config.minPositionValue);
     setCheckInterval(config.checkIntervalMs / 1000);
-  }, [onLog]);
+    setMonitorState(autoYieldMonitor.getState());
+  }, []);
   
   // Detect testnet
   useEffect(() => {
@@ -738,7 +738,7 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Gas Cost</span>
-                <span className="text-orange-400">{formatUsd(bestPlan.gasCostUsd)}</span>
+                <span className="text-spice-orange">{formatUsd(bestPlan.gasCostUsd)}</span>
               </div>
               <div className="border-t border-white/10 pt-2 flex justify-between text-sm">
                 <span className="text-gray-400">Net Annual Benefit</span>

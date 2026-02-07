@@ -5,7 +5,7 @@
 import { ChainId, convertQuoteToRoute } from '@lifi/sdk';
 import { BrowserProvider } from 'ethers';
 import { createPublicClient, http, formatUnits, parseUnits, Address, erc20Abi } from 'viem';
-import { mainnet, arbitrum, optimism, polygon, base, sepolia, arbitrumSepolia, optimismSepolia, baseSepolia } from 'viem/chains';
+import { mainnet, arbitrum, optimism, polygon, base, avalanche, sepolia, arbitrumSepolia, optimismSepolia, baseSepolia } from 'viem/chains';
 import { transactionHistory, getExplorerUrl } from './transactionHistory';
 import { lifiService, lifi } from './lifi';
 
@@ -13,11 +13,12 @@ import { lifiService, lifi } from './lifi';
 export const SUPPORTED_CHAINS = {
   // Mainnet - with fallback RPC endpoints (Ethereum first with multiple reliable options)
   mainnet: [
-    { id: 1, name: 'Ethereum', chain: mainnet, rpcs: ['https://rpc.ankr.com/eth', 'https://eth.drpc.org', 'https://1rpc.io/eth', 'https://cloudflare-eth.com'] },
+    { id: 1, name: 'Ethereum', chain: mainnet, rpcs: ['https://eth.drpc.org', 'https://1rpc.io/eth', 'https://cloudflare-eth.com', 'https://rpc.ankr.com/eth'] },
     { id: 42161, name: 'Arbitrum', chain: arbitrum, rpcs: ['https://arb1.arbitrum.io/rpc', 'https://rpc.ankr.com/arbitrum'] },
     { id: 10, name: 'Optimism', chain: optimism, rpcs: ['https://mainnet.optimism.io', 'https://rpc.ankr.com/optimism'] },
     { id: 137, name: 'Polygon', chain: polygon, rpcs: ['https://polygon-rpc.com', 'https://rpc.ankr.com/polygon'] },
-    { id: 8453, name: 'Base', chain: base, rpcs: ['https://mainnet.base.org', 'https://rpc.ankr.com/base'] },
+    { id: 8453, name: 'Base', chain: base, rpcs: ['https://base.llamarpc.com', 'https://1rpc.io/base', 'https://mainnet.base.org'] },
+    { id: 43114, name: 'Avalanche', chain: avalanche, rpcs: ['https://api.avax.network/ext/bc/C/rpc', 'https://rpc.ankr.com/avalanche'] },
   ],
   // Testnet
   testnet: [
@@ -82,6 +83,12 @@ export const MAINNET_TOKENS: Record<number, Record<string, Address>> = {
     USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
     USDbC: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA',
     WETH: '0x4200000000000000000000000000000000000006',
+  },
+  43114: {
+    USDC: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E',
+    'USDC.e': '0xA7D7079b0FEaD91F3e65f86E8915Cb59c1a4C664',
+    USDT: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7',
+    WETH: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB',
   },
 };
 
@@ -298,6 +305,39 @@ export async function getWalletPositions(
   const results = await Promise.all(chainPromises);
   results.forEach(chainPositions => positions.push(...chainPositions));
 
+  // Fallback: if RPC scan returned 0 positions, try portfolio tracker (has fallback RPCs)
+  if (positions.length === 0 && !isTestnet) {
+    console.log('[Yield] ⚠️ RPC scan found no positions, trying portfolio tracker fallback...');
+    try {
+      const { getPortfolioSummary } = await import('./portfolioTracker');
+      const portfolio = await getPortfolioSummary(walletAddress);
+      for (const p of portfolio.positions) {
+        const tokens = MAINNET_TOKENS[p.chainId];
+        if (!tokens) continue;
+        const tokenKey = p.tokenSymbol === 'USDC.e' ? 'USDC.e' : p.tokenSymbol === 'USDbC' ? 'USDbC' : p.tokenSymbol;
+        const tokenAddr = tokens[tokenKey] || tokens['USDC'] || tokens['WETH'];
+        if (!tokenAddr) continue;
+        const decimals = p.tokenSymbol.includes('USD') ? 6 : 18;
+        const balanceRaw = BigInt(Math.floor(p.balance * Math.pow(10, decimals)));
+        if (balanceRaw === 0n) continue;
+        positions.push({
+          chainId: p.chainId,
+          chainName: p.chainName,
+          token: p.tokenSymbol,
+          tokenAddress: tokenAddr as Address,
+          balance: balanceRaw,
+          balanceFormatted: p.balance.toString(),
+          decimals,
+          valueUsd: p.valueUSD,
+          currentApy: 0,
+        });
+      }
+      console.log(`[Yield] 📊 Portfolio fallback: ${positions.length} positions`);
+    } catch (err) {
+      console.warn('[Yield] Portfolio fallback failed:', err);
+    }
+  }
+
   console.log(`[Yield] 📊 Total positions found: ${positions.length}`);
   positions.forEach(p => {
     console.log(`[Yield]    • ${p.token} on ${p.chainName}: ${parseFloat(p.balanceFormatted).toFixed(4)}`);
@@ -306,19 +346,23 @@ export async function getWalletPositions(
   return positions;
 }
 
-// Trusted protocols with established track records
+// Trusted protocols with established track records - expanded to use all protocols
 const TRUSTED_PROTOCOLS = new Set([
-  'aave-v3', 'aave-v2', 'compound-v3', 'compound-v2', 'compound',
+  'aave-v3', 'aave-v2', 'aave', 'compound-v3', 'compound-v2', 'compound',
   'maker', 'makerdao', 'sky',
   'lido', 'rocket-pool', 'frax-ether',
   'curve-dex', 'curve', 'convex-finance',
-  'uniswap-v3', 'uniswap-v2',
+  'uniswap-v3', 'uniswap-v2', 'uniswap',
   'yearn-finance', 'yearn',
   'morpho', 'morpho-blue', 'morpho-aave',
   'spark', 'spark-lend',
-  'fluid', 'instadapp',
+  'fluid', 'fluid-dex', 'instadapp',
   'pendle', 'eigenlayer',
   'gearbox', 'euler',
+  'merkl', 'velodrome', 'aerodrome', 'camelot', 'ramses', 'thena',
+  'pancakeswap', 'sushiswap', 'trader-joe', 'quickswap',
+  'benqi', 'radiant', 'gmx', 'gains-network',
+  'beefy', 'convex',
 ]);
 
 // Protocols known for volatile/incentivized yields - require extra scrutiny
@@ -435,14 +479,15 @@ export async function fetchYieldOpportunities(
       'Optimism': 10,
       'Polygon': 137,
       'Base': 8453,
+      'Avalanche': 43114,
     };
 
     const supportedChainNames = Object.keys(chainNameToId);
     const supportedTokens = tokenFilter
       ? [tokenFilter.toUpperCase()]
-      : ['USDC', 'USDT', 'DAI', 'WETH'];
+      : ['USDC', 'USDT', 'DAI', 'WETH', 'USDC.E', 'USDbC', 'ETH'];
 
-    // First pass: filter by basic criteria
+    // First pass: filter by basic criteria - use all protocols
     const filtered = pools.filter((pool: any) => {
       const chain = pool.chain || '';
       const symbol = (pool.symbol || '').toUpperCase();
@@ -453,7 +498,7 @@ export async function fetchYieldOpportunities(
       if (!supportedChainNames.includes(chain)) return false;
       if (!supportedTokens.some(t => symbol.includes(t))) return false;
       if (apy < 0.5 || apy > 100) return false; // Filter out < 0.5% and bloated yields (>100% usually unsustainable)
-      if (tvl < 500000) return false; // Min $500k TVL
+      if (tvl < 300000) return false; // Min $300k TVL to include more protocols
 
       return true;
     });
@@ -485,8 +530,8 @@ export async function fetchYieldOpportunities(
       console.log(`[Yield]   ${i + 1}. ${opp.protocol} on ${opp.chainName}: ${opp.apy.toFixed(2)}% APY (base: ${opp.apyBase.toFixed(2)}%, reward: ${opp.apyReward.toFixed(2)}%) - Risk: ${opp.risk}, Score: ${opp.score.toFixed(2)}${opp.flags.length ? ` [${opp.flags.join(', ')}]` : ''}`);
     });
 
-    // Return top 20 by score
-    return scored.slice(0, 20).map(({ score, flags, apyBase, apyReward, ...opp }) => opp);
+    // Return top 50 by score - use all protocols
+    return scored.slice(0, 50).map(({ score, flags, apyBase, apyReward, ...opp }) => opp);
   } catch (error) {
     console.error('Error fetching yields:', error);
     return [];
@@ -576,8 +621,11 @@ export async function executeYieldRotation(
   walletClient: any, // Wagmi wallet client
   onStatusUpdate?: (status: string) => void
 ): Promise<ExecutionResult> {
-  // Get wallet address from walletClient
   const walletAddress = walletClient?.account?.address as Address;
+  if (!walletClient || !walletAddress) {
+    const errMsg = 'Wallet not connected. Please connect your wallet (e.g. MetaMask) to sign the transaction.';
+    return { success: false, error: errMsg };
+  }
 
   // Create pending transaction record
   const tx = transactionHistory.addTransaction({
@@ -606,16 +654,17 @@ export async function executeYieldRotation(
     onStatusUpdate?.('Preparing transaction...');
     
     if (!plan.route) {
-      // Same chain operation - just return success indicator
-      // In production, this would deposit into the protocol
-      onStatusUpdate?.('Same-chain operation - deposit directly to protocol');
+      // Same chain operation - NOT supported yet; requires protocol-specific deposit integration
+      // Do NOT fake success - user must sign with wallet for any real execution
+      const errMsg = 'Same-chain rotation not supported yet. We only execute via LI.FI for cross-chain moves. Use the Intent Chat to "make best use of X USDC from Ethereum" for cross-chain routes, or bridge funds to another chain first.';
+      onStatusUpdate?.(errMsg);
       transactionHistory.updateTransaction(tx.id, {
-        status: 'completed',
-        error: 'Same-chain deposits require protocol-specific integration',
+        status: 'failed',
+        error: errMsg,
       });
       return {
-        success: true,
-        error: 'Same-chain deposits require protocol-specific integration',
+        success: false,
+        error: errMsg,
       };
     }
     
@@ -752,15 +801,19 @@ export async function findBestRotation(
   // Sort by net benefit
   allPlans.sort((a, b) => b.netBenefit - a.netBenefit);
 
-  console.log(`[Yield] ✅ Generated ${allPlans.length} profitable rotation plans`);
-  if (allPlans[0]) {
-    console.log(`[Yield] 🏆 Best plan: ${allPlans[0].fromPosition.chainName} → ${allPlans[0].toOpportunity.chainName} (${allPlans[0].toOpportunity.protocol}) +${allPlans[0].apyImprovement.toFixed(2)}% APY`);
+  // Only use executable (cross-chain with LI.FI route) plans - same-chain needs protocol deposits we don't support
+  const executablePlans = allPlans.filter(p => p.route !== null);
+  const bestPlan = executablePlans.length > 0 ? executablePlans[0] : null;
+
+  console.log(`[Yield] ✅ Generated ${allPlans.length} profitable rotation plans (${executablePlans.length} executable)`);
+  if (bestPlan) {
+    console.log(`[Yield] 🏆 Best plan: ${bestPlan.fromPosition.chainName} → ${bestPlan.toOpportunity.chainName} (${bestPlan.toOpportunity.protocol}) +${bestPlan.apyImprovement.toFixed(2)}% APY`);
   }
 
   return {
     positions,
     opportunities,
-    bestPlan: allPlans[0] || null,
+    bestPlan,
     allPlans,
   };
 }
@@ -800,14 +853,18 @@ export async function oneClickYieldRotation(
     if (positions.length === 0) {
       return {
         success: false,
-        error: 'No tokens found in wallet',
+        error: 'No tokens found in wallet. Ensure you have USDC, USDT, DAI, or WETH on Ethereum, Arbitrum, Optimism, Polygon, Base, or Avalanche.',
       };
     }
     
     if (!bestPlan) {
+      const hasPlans = positions.length > 0;
+      const hint = hasPlans
+        ? ` Try lowering "Min APY Improvement" in settings, or ensure you have 10+ USDC—cross-chain bridges often need minimum amounts.`
+        : '';
       return {
         success: false,
-        error: `No opportunities found with >${minApyImprovement}% APY improvement`,
+        error: `No opportunities found with >${minApyImprovement}% APY improvement.${hint}`,
       };
     }
     

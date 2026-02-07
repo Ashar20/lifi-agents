@@ -853,7 +853,7 @@ export const ArbitrageExecutor: React.FC<ArbitrageExecutorProps> = ({ onLog }) =
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Gas Cost</span>
-                <span className="text-orange-400">{formatUsd(executionPlan.gasCostEstimate)}</span>
+                <span className="text-spice-orange">{formatUsd(executionPlan.gasCostEstimate)}</span>
               </div>
               <div className="border-t border-white/10 pt-2 flex justify-between text-sm">
                 <span className="text-gray-400">Net Profit</span>

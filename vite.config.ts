@@ -3,7 +3,7 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
-    const env = loadEnv(mode, '.', '');
+    const env = loadEnv(mode, path.resolve(__dirname), '');
     return {
       server: {
         port: 3000,
@@ -12,6 +12,7 @@ export default defineConfig(({ mode }) => {
       plugins: [react()],
       define: {
         'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(env.VITE_GEMINI_API_KEY),
+        'import.meta.env.VITE_LIFI_API_KEY': JSON.stringify(env.VITE_LIFI_API_KEY),
         'import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID': JSON.stringify(env.VITE_WALLET_CONNECT_PROJECT_ID),
         // Fix for buffer not defined in browser
         global: 'globalThis',
@@ -20,15 +21,17 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
           '@images': path.resolve(__dirname, 'images'),
+          buffer: 'buffer',
         }
       },
       optimizeDeps: {
+        include: ['buffer'],
         esbuildOptions: {
           // Node.js global to browser globalThis
           define: {
             global: 'globalThis'
           },
         }
-      }
+      },
     };
 });

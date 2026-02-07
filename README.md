@@ -69,7 +69,10 @@ Create `.env` in the project root:
 ```env
 VITE_GEMINI_API_KEY=your_gemini_api_key_here
 VITE_WALLET_CONNECT_PROJECT_ID=your_wallet_connect_id  # optional
+VITE_LIFI_API_KEY=your_lifi_api_key  # optional - avoids 429 rate limits (200 req/min vs 200 req/2hr)
 ```
+
+> **LI.FI rate limits**: Without an API key, LI.FI allows ~200 quote requests per 2 hours. You may see "Something went wrong" / 429 errors during heavy use. Get a free API key at [li.fi/plans](https://li.fi/plans/) and set `VITE_LIFI_API_KEY` for 200 req/min. *For production, use a backend proxy—never expose API keys in client bundles.*
 
 ### Run
 

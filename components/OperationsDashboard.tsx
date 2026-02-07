@@ -103,6 +103,7 @@ export const OperationsDashboard: React.FC<OperationsDashboardProps> = ({
       case 'yield_optimization': return <TrendingUp className="w-4 h-4" />;
       case 'rebalancing': return <Target className="w-4 h-4" />;
       case 'cross_chain_swap': return <Zap className="w-4 h-4" />;
+      case 'yield_deposit': return <TrendingUp className="w-4 h-4" />;
       case 'position_monitoring': return <Database className="w-4 h-4" />;
       case 'risk_analysis': return <Shield className="w-4 h-4" />;
       case 'strategy_coordination': return <Target className="w-4 h-4" />;

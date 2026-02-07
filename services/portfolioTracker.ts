@@ -1,8 +1,18 @@
 // Real Portfolio Position Tracker
 // Queries wallet balances across multiple chains and tracks positions
 
-import { createPublicClient, http, formatUnits, getAddress, type PublicClient } from 'viem';
+import { createPublicClient, http, fallback, formatUnits, getAddress, type PublicClient } from 'viem';
 import { mainnet, arbitrum, optimism, polygon, base, avalanche } from 'viem/chains';
+
+// Fallback RPC URLs per chain (primary first) - improves reliability when one RPC fails
+const RPC_URLS: Record<number, string[]> = {
+  1: ['https://eth.drpc.org', 'https://1rpc.io/eth', 'https://cloudflare-eth.com', 'https://rpc.ankr.com/eth'],
+  42161: ['https://arb1.arbitrum.io/rpc', 'https://rpc.ankr.com/arbitrum'],
+  10: ['https://mainnet.optimism.io', 'https://rpc.ankr.com/optimism'],
+  137: ['https://polygon-rpc.com', 'https://rpc.ankr.com/polygon'],
+  8453: ['https://base.llamarpc.com', 'https://1rpc.io/base', 'https://mainnet.base.org'],
+  43114: ['https://api.avax.network/ext/bc/C/rpc', 'https://rpc.ankr.com/avalanche'],
+};
 
 export interface TokenBalance {
   chainId: number;
@@ -40,12 +50,12 @@ export interface PortfolioSummary {
 
 // Chain configurations with RPC endpoints
 const CHAIN_CONFIGS = {
-  1: { ...mainnet, name: 'Ethereum', rpc: 'https://rpc.ankr.com/eth' },
-  42161: { ...arbitrum, name: 'Arbitrum', rpc: 'https://arb1.arbitrum.io/rpc' },
-  10: { ...optimism, name: 'Optimism', rpc: 'https://mainnet.optimism.io' },
-  137: { ...polygon, name: 'Polygon', rpc: 'https://polygon-rpc.com' },
-  8453: { ...base, name: 'Base', rpc: 'https://mainnet.base.org' },
-  43114: { ...avalanche, name: 'Avalanche', rpc: 'https://api.avax.network/ext/bc/C/rpc' },
+  1: { ...mainnet, name: 'Ethereum', rpc: RPC_URLS[1][0] },
+  42161: { ...arbitrum, name: 'Arbitrum', rpc: RPC_URLS[42161][0] },
+  10: { ...optimism, name: 'Optimism', rpc: RPC_URLS[10][0] },
+  137: { ...polygon, name: 'Polygon', rpc: RPC_URLS[137][0] },
+  8453: { ...base, name: 'Base', rpc: RPC_URLS[8453][0] },
+  43114: { ...avalanche, name: 'Avalanche', rpc: RPC_URLS[43114][0] },
 };
 
 // Common ERC20 token ABIs
@@ -99,19 +109,19 @@ const TRACKED_TOKENS: Record<number, Array<{ address: string; symbol: string; de
     { address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', symbol: 'WETH', decimals: 18 },
   ],
   42161: [
-    { address: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8', symbol: 'USDC', decimals: 6 },
+    { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC', decimals: 6 },
     { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', symbol: 'USDT', decimals: 6 },
     { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', symbol: 'DAI', decimals: 18 },
     { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', symbol: 'WETH', decimals: 18 },
   ],
   10: [
-    { address: '0x7F5c764cBc14f9669B88837ca1490cCa17c31607', symbol: 'USDC', decimals: 6 },
+    { address: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', symbol: 'USDC', decimals: 6 },
     { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', symbol: 'USDT', decimals: 6 },
     { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', symbol: 'DAI', decimals: 18 },
     { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', decimals: 18 },
   ],
   137: [
-    { address: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', symbol: 'USDC', decimals: 6 },
+    { address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', symbol: 'USDC', decimals: 6 },
     { address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', symbol: 'USDT', decimals: 6 },
     { address: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063', symbol: 'DAI', decimals: 18 },
     { address: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619', symbol: 'WETH', decimals: 18 },
@@ -130,16 +140,34 @@ const TRACKED_TOKENS: Record<number, Array<{ address: string; symbol: string; de
   ],
 };
 
+// Fallback prices for native tokens and stablecoins (used when API fails)
+const FALLBACK_PRICES: Record<string, number> = {
+  ETH: 2500,
+  WETH: 2500,
+  MATIC: 0.8,
+  AVAX: 35,
+  USDC: 1,
+  USDT: 1,
+  DAI: 1,
+};
+
 // Get token price from price fetcher
 async function getTokenPrice(chainId: number, tokenAddress: string, tokenSymbol: string): Promise<number> {
+  // Use fallback price immediately for known tokens to avoid API delays
+  const fallback = FALLBACK_PRICES[tokenSymbol.toUpperCase()];
+
   try {
     const { fetchTokenPrice } = await import('./priceFetcher');
     const priceData = await fetchTokenPrice(chainId, tokenAddress, tokenSymbol);
-    return priceData?.priceUSD || 0;
+    if (priceData?.priceUSD && priceData.priceUSD > 0) {
+      return priceData.priceUSD;
+    }
   } catch (error) {
-    console.warn(`Failed to get price for ${tokenSymbol} on chain ${chainId}:`, error);
-    return 0;
+    console.warn(`[Portfolio] Price fetch failed for ${tokenSymbol}, using fallback:`, error);
   }
+
+  // Return fallback price if API fails
+  return fallback || 0;
 }
 
 // Get native token balance (ETH, MATIC, AVAX)
@@ -148,19 +176,23 @@ async function getNativeBalance(
   address: string,
   chainId: number
 ): Promise<TokenBalance | null> {
+  const chainName = CHAIN_CONFIGS[chainId as keyof typeof CHAIN_CONFIGS]?.name || `Chain ${chainId}`;
+  const nativeToken = NATIVE_TOKENS[chainId as keyof typeof NATIVE_TOKENS];
+  if (!nativeToken) return null;
+
+  // Try viem client first
   try {
     const balance = await client.getBalance({ address: address as `0x${string}` });
-    const nativeToken = NATIVE_TOKENS[chainId as keyof typeof NATIVE_TOKENS];
-    if (!nativeToken) return null;
-
     const balanceFormatted = parseFloat(formatUnits(balance, nativeToken.decimals));
-    
+
+    console.log(`[Portfolio] ${chainName} native balance via viem: ${balanceFormatted} ${nativeToken.symbol}`);
+
     // Get price
     const priceUSD = await getTokenPrice(chainId, nativeToken.address, nativeToken.symbol);
-    
+
     return {
       chainId,
-      chainName: CHAIN_CONFIGS[chainId as keyof typeof CHAIN_CONFIGS]?.name || `Chain ${chainId}`,
+      chainName,
       tokenAddress: nativeToken.address,
       tokenSymbol: nativeToken.symbol,
       tokenName: nativeToken.symbol,
@@ -170,10 +202,53 @@ async function getNativeBalance(
       priceUSD,
       valueUSD: balanceFormatted * priceUSD,
     };
-  } catch (error) {
-    console.warn(`Failed to get native balance for chain ${chainId}:`, error);
-    return null;
+  } catch (viemError) {
+    console.warn(`[Portfolio] Viem failed for ${chainName}, trying direct RPC:`, viemError);
   }
+
+  // Fallback: direct RPC call with multiple endpoints
+  const rpcUrls = RPC_URLS[chainId] || [];
+  for (const rpcUrl of rpcUrls) {
+    try {
+      const response = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: Date.now(),
+          method: 'eth_getBalance',
+          params: [address.toLowerCase(), 'latest']
+        })
+      });
+      const result = await response.json();
+      if (result.error || !result.result) continue;
+
+      const balance = BigInt(result.result);
+      const balanceFormatted = parseFloat(formatUnits(balance, nativeToken.decimals));
+
+      console.log(`[Portfolio] ${chainName} native balance via RPC (${rpcUrl}): ${balanceFormatted} ${nativeToken.symbol}`);
+
+      const priceUSD = await getTokenPrice(chainId, nativeToken.address, nativeToken.symbol);
+
+      return {
+        chainId,
+        chainName,
+        tokenAddress: nativeToken.address,
+        tokenSymbol: nativeToken.symbol,
+        tokenName: nativeToken.symbol,
+        balance: balance.toString(),
+        balanceFormatted,
+        decimals: nativeToken.decimals,
+        priceUSD,
+        valueUSD: balanceFormatted * priceUSD,
+      };
+    } catch (rpcError) {
+      console.warn(`[Portfolio] RPC ${rpcUrl} failed for ${chainName}:`, rpcError);
+    }
+  }
+
+  console.error(`[Portfolio] All methods failed to get native balance for ${chainName}`);
+  return null;
 }
 
 // Get ERC20 token balance
@@ -185,56 +260,83 @@ async function getTokenBalance(
   tokenSymbol: string,
   decimals: number
 ): Promise<TokenBalance | null> {
+  const chainName = CHAIN_CONFIGS[chainId as keyof typeof CHAIN_CONFIGS]?.name || `Chain ${chainId}`;
+  let balanceRaw: bigint | null = null;
+
+  // Try viem client first
   try {
-    const balance = await client.readContract({
+    balanceRaw = await client.readContract({
       address: tokenAddress as `0x${string}`,
       abi: ERC20_ABI,
       functionName: 'balanceOf',
       args: [address as `0x${string}`],
-    });
+    }) as bigint;
+  } catch (viemError) {
+    console.warn(`[Portfolio] Viem failed for ${tokenSymbol} on ${chainName}, trying direct RPC`);
+  }
 
-    const balanceFormatted = parseFloat(formatUnits(balance as bigint, decimals));
-    
-    // Skip if balance is 0
-    if (balanceFormatted < 0.000001) return null;
+  // Fallback: direct RPC call
+  if (balanceRaw === null) {
+    const rpcUrls = RPC_URLS[chainId] || [];
+    const normalizedWallet = address.toLowerCase();
+    const normalizedToken = tokenAddress.toLowerCase();
+    const data = '0x70a08231' + normalizedWallet.slice(2).padStart(64, '0');
 
-    // Get token name
-    let tokenName = tokenSymbol;
-    try {
-      tokenName = await client.readContract({
-        address: tokenAddress as `0x${string}`,
-        abi: ERC20_ABI,
-        functionName: 'name',
-      }) as string;
-    } catch {
-      // Use symbol if name fetch fails
+    for (const rpcUrl of rpcUrls) {
+      try {
+        const response = await fetch(rpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: Date.now(),
+            method: 'eth_call',
+            params: [{ to: normalizedToken, data }, 'latest']
+          })
+        });
+        const result = await response.json();
+        if (result.error || !result.result || result.result === '0x' || result.result === '0x0') continue;
+        balanceRaw = BigInt(result.result);
+        break;
+      } catch {
+        continue;
+      }
     }
+  }
 
-    // Get price
-    const priceUSD = await getTokenPrice(chainId, tokenAddress, tokenSymbol);
-    
-    return {
-      chainId,
-      chainName: CHAIN_CONFIGS[chainId as keyof typeof CHAIN_CONFIGS]?.name || `Chain ${chainId}`,
-      tokenAddress,
-      tokenSymbol,
-      tokenName,
-      balance: balance.toString(),
-      balanceFormatted,
-      decimals,
-      priceUSD,
-      valueUSD: balanceFormatted * priceUSD,
-    };
-  } catch (error) {
-    console.warn(`Failed to get token balance for ${tokenSymbol} on chain ${chainId}:`, error);
+  if (balanceRaw === null) {
+    console.warn(`[Portfolio] All methods failed for ${tokenSymbol} on ${chainName}`);
     return null;
   }
+
+  const balanceFormatted = parseFloat(formatUnits(balanceRaw, decimals));
+
+  // Skip if balance is effectively 0
+  if (balanceFormatted < 0.000001) return null;
+
+  console.log(`[Portfolio] ${chainName} ${tokenSymbol}: ${balanceFormatted}`);
+
+  // Get price
+  const priceUSD = await getTokenPrice(chainId, tokenAddress, tokenSymbol);
+
+  return {
+    chainId,
+    chainName,
+    tokenAddress,
+    tokenSymbol,
+    tokenName: tokenSymbol,
+    balance: balanceRaw.toString(),
+    balanceFormatted,
+    decimals,
+    priceUSD,
+    valueUSD: balanceFormatted * priceUSD,
+  };
 }
 
 // Fetch all balances for a wallet address across chains
 export async function fetchWalletPortfolio(
   walletAddress: string,
-  chainIds: number[] = [1, 42161, 10, 137, 8453]
+  chainIds: number[] = [1, 42161, 10, 137, 8453, 43114]
 ): Promise<TokenBalance[]> {
   if (!walletAddress || !walletAddress.startsWith('0x')) {
     throw new Error('Invalid wallet address. Must be a valid Ethereum address starting with 0x');
@@ -254,10 +356,13 @@ export async function fetchWalletPortfolio(
     if (!chainConfig) return [];
 
     try {
-      // Create public client for this chain
+      const rpcUrls = RPC_URLS[chainId] || [chainConfig.rpc];
+      const transport = rpcUrls.length > 1
+        ? fallback(rpcUrls.map((url) => http(url)))
+        : http(chainConfig.rpc);
       const client = createPublicClient({
         chain: chainConfig,
-        transport: http(chainConfig.rpc),
+        transport,
       });
 
       const chainBalances: TokenBalance[] = [];
@@ -301,7 +406,7 @@ export async function fetchWalletPortfolio(
 // Get portfolio summary
 export async function getPortfolioSummary(
   walletAddress: string,
-  chainIds: number[] = [1, 42161, 10, 137, 8453]
+  chainIds: number[] = [1, 42161, 10, 137, 8453, 43114]
 ): Promise<PortfolioSummary> {
   const balances = await fetchWalletPortfolio(walletAddress, chainIds);
   

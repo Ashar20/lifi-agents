@@ -61,6 +61,7 @@ export const AgentResultsPage: React.FC<AgentResultsPageProps> = ({
       case 'alert_broadcast': return 'Emergency Alert';
       case 'strategic_command': return 'Strategic Command';
       case 'custom_order': return 'Custom Operation';
+      case 'yield_deposit': return 'Yield Deposit';
       default: return taskType.replace(/_/g, ' ').toUpperCase();
     }
   };

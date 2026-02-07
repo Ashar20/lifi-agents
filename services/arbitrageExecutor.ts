@@ -17,7 +17,7 @@ export const CHAINS = {
     { id: 42161, name: 'Arbitrum', chain: arbitrum, rpc: 'https://arb1.arbitrum.io/rpc', explorer: 'https://arbiscan.io' },
     { id: 10, name: 'Optimism', chain: optimism, rpc: 'https://mainnet.optimism.io', explorer: 'https://optimistic.etherscan.io' },
     { id: 137, name: 'Polygon', chain: polygon, rpc: 'https://polygon-rpc.com', explorer: 'https://polygonscan.com' },
-    { id: 8453, name: 'Base', chain: base, rpc: 'https://mainnet.base.org', explorer: 'https://basescan.org' },
+    { id: 8453, name: 'Base', chain: base, rpc: 'https://base.llamarpc.com', explorer: 'https://basescan.org' },
   ],
   testnet: [
     { id: 11155111, name: 'Sepolia', chain: sepolia, rpc: 'https://rpc.sepolia.org', explorer: 'https://sepolia.etherscan.io' },

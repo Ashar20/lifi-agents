@@ -33,7 +33,8 @@ export type TaskType =
   | 'arbitrage_detection'      // Find price differences
   | 'yield_optimization'       // Find best yields
   | 'rebalancing'              // Maintain allocations
-  | 'cross_chain_swap'         // Execute LI.FI route
+  | 'cross_chain_swap'         // Execute LI.FI route (bridge only)
+  | 'yield_deposit'            // Bridge + deposit to yield protocol (Aave etc.)
   | 'position_monitoring'      // Track positions
   | 'risk_analysis'             // Analyze route safety
   | 'strategy_coordination';    // Orchestrate team

@@ -38,7 +38,7 @@ async function fetchDefiLlamaYields(): Promise<YieldOpportunity[]> {
     
     // Filter for major stablecoins and ETH on supported chains
     const supportedChains = ['Ethereum', 'Arbitrum', 'Optimism', 'Polygon', 'Base', 'Avalanche'];
-    const supportedTokens = ['USDC', 'USDT', 'DAI', 'WETH', 'ETH', 'USDC.e', 'USDbC'];
+    const supportedTokens = ['USDC', 'USDT', 'DAI', 'WETH', 'ETH', 'USDC.e', 'USDbC', 'AVAX'];
     
     const opportunities: YieldOpportunity[] = pools
       .filter((pool: any) => {
@@ -50,7 +50,7 @@ async function fetchDefiLlamaYields(): Promise<YieldOpportunity[]> {
           supportedTokens.some(token => symbol.toUpperCase().includes(token)) &&
           apy > 0.1 && // Filter out near-zero APYs
           apy <= 100 && // Filter bloated/inflationary APYs (>100% is usually unsustainable)
-          pool.tvlUsd > 100000 // Filter out small pools (< $100k TVL)
+          pool.tvlUsd > 100000 // Filter out small pools - use all protocols
         );
       })
       .map((pool: any) => {
@@ -98,25 +98,25 @@ function extractTokenSymbol(symbol: string): string {
   return tokens[0] || symbol;
 }
 
-// Determine pool type based on protocol and symbol
+// Determine pool type based on protocol and symbol - use all protocols
 function getPoolType(protocol: string, symbol: string): 'lending' | 'staking' | 'liquidity' | 'vault' {
-  const lendingProtocols = ['aave', 'compound', 'spark', 'benqi', 'radiant'];
-  const stakingProtocols = ['lido', 'rocket-pool', 'frax-ether'];
-  const vaultProtocols = ['yearn', 'beefy', 'convex'];
+  const lendingProtocols = ['aave', 'compound', 'spark', 'benqi', 'radiant', 'morpho', 'euler'];
+  const stakingProtocols = ['lido', 'rocket-pool', 'frax-ether', 'eigenlayer'];
+  const vaultProtocols = ['yearn', 'beefy', 'convex', 'pendle'];
   
   const protocolLower = protocol.toLowerCase();
   
   if (lendingProtocols.some(p => protocolLower.includes(p))) return 'lending';
   if (stakingProtocols.some(p => protocolLower.includes(p))) return 'staking';
   if (vaultProtocols.some(p => protocolLower.includes(p))) return 'vault';
-  if (symbol.includes('-')) return 'liquidity';
+  if (symbol.includes('-') || protocolLower.includes('uniswap') || protocolLower.includes('curve') || protocolLower.includes('velodrome') || protocolLower.includes('aerodrome')) return 'liquidity';
   
   return 'lending';
 }
 
-// Determine risk level based on APY, TVL, and protocol
+// Determine risk level based on APY, TVL, and protocol - use all protocols
 function getRiskLevel(apy: number, tvl: number, protocol: string): 'low' | 'medium' | 'high' {
-  const safeProtocols = ['aave', 'compound', 'lido', 'maker'];
+  const safeProtocols = ['aave', 'compound', 'lido', 'maker', 'morpho', 'curve', 'uniswap', 'yearn'];
   const protocolLower = protocol.toLowerCase();
   
   // Very high APY = higher risk
@@ -131,6 +131,40 @@ function getRiskLevel(apy: number, tvl: number, protocol: string): 'low' | 'medi
   if (safeProtocols.some(p => protocolLower.includes(p))) return 'low';
   
   return 'medium';
+}
+
+// Aave on Arbitrum - we have full bridge+deposit integration, so ensure it's discoverable for USDC
+const ARBITRUM_CHAIN_ID = 42161;
+
+/** Get Aave USDC yield on Arbitrum (used for cross-chain bridge+deposit flow) */
+export async function getAaveUsdcArbitrumYield(): Promise<YieldOpportunity | null> {
+  try {
+    const response = await fetch('https://yields.llama.fi/pools');
+    if (!response.ok) return null;
+    const data = await response.json();
+    const pools = data.data || [];
+    const pool = pools.find((p: any) =>
+      (p.chain === 'Arbitrum' || p.chain === 'arbitrum') &&
+      (p.project || '').toLowerCase().includes('aave') &&
+      (p.symbol || '').toUpperCase().includes('USDC')
+    );
+    if (!pool || !pool.apy || pool.apy < 0.1) return null;
+    return {
+      protocol: pool.project || 'aave-v3',
+      chainId: ARBITRUM_CHAIN_ID,
+      chainName: 'Arbitrum',
+      token: pool.symbol,
+      tokenSymbol: 'USDC',
+      apy: pool.apy,
+      tvl: pool.tvlUsd || 0,
+      type: 'lending',
+      url: 'https://app.aave.com/',
+      risk: 'low',
+      lastUpdated: Date.now(),
+    };
+  } catch {
+    return null;
+  }
 }
 
 // Main function to get best yield opportunities
@@ -151,6 +185,14 @@ export async function getBestYieldOpportunities(
   
   if (chainFilter) {
     filtered = filtered.filter(opp => opp.chainId === chainFilter);
+  }
+  
+  // For USDC: ensure Aave on Arbitrum is included (we have full bridge+deposit integration)
+  if (tokenFilter?.toUpperCase().includes('USDC') && !chainFilter) {
+    const aaveArb = await getAaveUsdcArbitrumYield();
+    if (aaveArb && !filtered.some(o => o.chainId === ARBITRUM_CHAIN_ID && o.protocol.toLowerCase().includes('aave'))) {
+      filtered = [aaveArb, ...filtered];
+    }
   }
   
   return filtered;

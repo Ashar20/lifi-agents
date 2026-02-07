@@ -1,7 +1,7 @@
 // Intent Parser - Analyzes user intents and determines agent connections
 
 export interface IntentAnalysis {
-  intentType: 'yield_optimization' | 'arbitrage' | 'rebalancing' | 'monitoring' | 'portfolio_check' | 'execute' | 'swap' | 'swap_clarification' | 'general';
+  intentType: 'yield_optimization' | 'arbitrage' | 'rebalancing' | 'monitoring' | 'portfolio_check' | 'execute' | 'swap' | 'swap_clarification' | 'vault_deposit' | 'hedge' | 'borrow' | 'staged_strategy' | 'general';
   requiredAgents: string[]; // Agent IDs
   connections: Array<{ source: string; target: string }>;
   description: string;
@@ -11,18 +11,20 @@ export interface IntentAnalysis {
 export const parseIntent = (intent: string): IntentAnalysis => {
   const lowerIntent = intent.toLowerCase();
   
-  // Yield optimization patterns - including "best use of X USDC from my wallet"
+  // Yield optimization patterns - including "best use of X USDC from my wallet" or "make best of 1 usd from ethereum"
   if (
     lowerIntent.includes('yield') ||
     lowerIntent.includes('apy') ||
     lowerIntent.includes('best use') ||
+    lowerIntent.includes('make best') ||
     (lowerIntent.includes('put my') && (lowerIntent.includes('usdc') || lowerIntent.includes('usdt') || lowerIntent.includes('capital'))) ||
     lowerIntent.includes('earns the most') ||
     lowerIntent.includes('where it earns') ||
     (lowerIntent.includes('deploy') && (lowerIntent.includes('higher') || lowerIntent.includes('better') || lowerIntent.includes('highest'))) ||
     lowerIntent.includes('optimize yield') ||
     (lowerIntent.includes('use my') && (lowerIntent.includes('wallet') || lowerIntent.includes('usdc') || lowerIntent.includes('funds'))) ||
-    (lowerIntent.includes('best') && (lowerIntent.includes('yield') || lowerIntent.includes('usdc')))
+    (lowerIntent.includes('best') && (lowerIntent.includes('yield') || lowerIntent.includes('usdc'))) ||
+    (lowerIntent.includes('from') && (lowerIntent.includes('ethereum') || lowerIntent.includes('eth')) && (lowerIntent.includes('usd') || lowerIntent.includes('usdc') || /\d+/.test(lowerIntent)))
   ) {
     return {
       intentType: 'yield_optimization',
@@ -130,6 +132,75 @@ export const parseIntent = (intent: string): IntentAnalysis => {
       connections: [],
       description: "What type of swap would you like? For example: 'Swap 100 USDC from Ethereum to Arbitrum' or 'Bridge my USDC to Polygon for higher yield'.",
       needsClarification: true,
+    };
+  }
+
+  // Hedge ETH exposure - reduce volatility risk
+  if (
+    lowerIntent.includes('hedge') && (lowerIntent.includes('eth') || lowerIntent.includes('exposure')) ||
+    lowerIntent.includes('reduce eth exposure') ||
+    lowerIntent.includes('hedge my eth')
+  ) {
+    return {
+      intentType: 'hedge',
+      requiredAgents: ['a0', 'a4', 'a6'],
+      connections: [
+        { source: 'a0', target: 'a4' },
+        { source: 'a4', target: 'a6' },
+        { source: 'a0', target: 'a6' }
+      ],
+      description: "I'll help you hedge your ETH exposure by swapping to USDC."
+    };
+  }
+
+  // Borrow / leverage
+  if (
+    lowerIntent.includes('borrow') ||
+    lowerIntent.includes('leverage') ||
+    (lowerIntent.includes('against') && lowerIntent.includes('collateral'))
+  ) {
+    return {
+      intentType: 'borrow',
+      requiredAgents: ['a0', 'a4', 'a6'],
+      connections: [
+        { source: 'a0', target: 'a4' },
+        { source: 'a4', target: 'a6' },
+        { source: 'a0', target: 'a6' }
+      ],
+      description: "I'll help you borrow against your Aave collateral on Arbitrum."
+    };
+  }
+
+  // Staged strategy / DCA
+  if (
+    lowerIntent.includes('staged') ||
+    lowerIntent.includes('dca') ||
+    lowerIntent.includes('steps over') ||
+    (lowerIntent.includes('deposit') && lowerIntent.includes('steps'))
+  ) {
+    return {
+      intentType: 'staged_strategy',
+      requiredAgents: ['a0', 'a6'],
+      connections: [{ source: 'a0', target: 'a6' }],
+      description: "I'll create a staged deposit plan for you."
+    };
+  }
+
+  // Vault deposit - cross-chain deposit into Aave (bridge + supply in one tx)
+  if (
+    (lowerIntent.includes('deposit') && (lowerIntent.includes('aave') || lowerIntent.includes('vault'))) ||
+    (lowerIntent.includes('aave') && (lowerIntent.includes('deposit') || lowerIntent.includes('supply'))) ||
+    (lowerIntent.includes('put') && lowerIntent.includes('aave'))
+  ) {
+    return {
+      intentType: 'vault_deposit',
+      requiredAgents: ['a0', 'a4', 'a6'],
+      connections: [
+        { source: 'a0', target: 'a4' },
+        { source: 'a4', target: 'a6' },
+        { source: 'a0', target: 'a6' }
+      ],
+      description: "Got it! I'll bridge your USDC and deposit it into Aave V3 on Arbitrum in one transaction."
     };
   }
 

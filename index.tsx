@@ -1,3 +1,6 @@
+import { Buffer } from 'buffer';
+(window as any).Buffer = Buffer;
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 // Ensure LI.FI integrator is set before any SDK calls (must be ≤23 chars)

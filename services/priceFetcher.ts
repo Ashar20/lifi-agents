@@ -34,7 +34,7 @@ const CHAINS = {
   42161: { name: 'Arbitrum', rpc: 'https://arb1.arbitrum.io/rpc' },
   10: { name: 'Optimism', rpc: 'https://mainnet.optimism.io' },
   137: { name: 'Polygon', rpc: 'https://polygon-rpc.com' },
-  8453: { name: 'Base', rpc: 'https://mainnet.base.org' },
+  8453: { name: 'Base', rpc: 'https://base.llamarpc.com' },
   43114: { name: 'Avalanche', rpc: 'https://api.avax.network/ext/bc/C/rpc' },
 };
 
@@ -118,12 +118,26 @@ async function fetchPriceFromCoinGecko(
 }
 
 
+// Fallback prices to avoid excessive API calls
+const FALLBACK_PRICES: Record<string, number> = {
+  ETH: 2500, WETH: 2500, MATIC: 0.8, AVAX: 35,
+  USDC: 1, USDT: 1, DAI: 1, 'USDC.e': 1, USDbC: 1,
+};
+
 // Fetch price from LI.FI quote (most accurate for DEX prices)
+// NOTE: This is expensive (API call) - prefer fallback prices when available
 async function fetchPriceFromLifi(
   chainId: number,
   tokenAddress: string,
+  tokenSymbol: string,
   amount: string = '1000000000'
 ): Promise<{ price: number; source: string } | null> {
+  // First check if we have a fallback price - avoid API call if possible
+  const fallbackPrice = FALLBACK_PRICES[tokenSymbol.toUpperCase()];
+  if (fallbackPrice) {
+    return { price: fallbackPrice, source: 'Fallback' };
+  }
+
   try {
     // Use USDC as quote token (most stable)
     const usdcAddress = TOKENS.USDC[chainId as keyof typeof TOKENS.USDC];
@@ -133,7 +147,10 @@ async function fetchPriceFromLifi(
     }
 
     const { lifiService } = await import('./lifi');
-    
+
+    // Use a dummy address for price quotes (required by LI.FI API)
+    const dummyAddress = '0x0000000000000000000000000000000000000001';
+
     // Get quote: token -> USDC to determine price
     const quote = await lifiService.getQuote({
       fromChain: chainId,
@@ -141,6 +158,7 @@ async function fetchPriceFromLifi(
       fromToken: tokenAddress,
       toToken: usdcAddress,
       fromAmount: amount,
+      fromAddress: dummyAddress,
     });
 
     if (!quote || !quote.estimate || !quote.estimate.toAmount) return null;
@@ -171,13 +189,29 @@ export async function fetchTokenPrice(
   tokenSymbol: string
 ): Promise<PriceData | null> {
   const chainName = CHAINS[chainId as keyof typeof CHAINS]?.name || `Chain ${chainId}`;
-  
-  // Try CoinGecko first (most reliable free API)
+
+  // First check fallback prices (instant, no API call)
+  const fallbackPrice = FALLBACK_PRICES[tokenSymbol.toUpperCase()];
+  if (fallbackPrice) {
+    return {
+      chainId,
+      chainName,
+      token: tokenAddress,
+      tokenSymbol,
+      price: fallbackPrice,
+      priceUSD: fallbackPrice,
+      source: 'Fallback',
+      liquidity: 0,
+      timestamp: Date.now(),
+    };
+  }
+
+  // Try CoinGecko (most reliable free API)
   let priceData = await fetchPriceFromCoinGecko(chainId, tokenAddress);
 
-  // Fallback to LI.FI (slower but most accurate for DEX prices)
+  // Fallback to LI.FI (slower, uses API quota)
   if (!priceData || priceData.price === 0) {
-    priceData = await fetchPriceFromLifi(chainId, tokenAddress);
+    priceData = await fetchPriceFromLifi(chainId, tokenAddress, tokenSymbol);
   }
 
   if (!priceData || priceData.price === 0) {
