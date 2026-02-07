@@ -8,8 +8,9 @@ import { createPublicClient, http, formatUnits, parseUnits, Address, erc20Abi } 
 import { mainnet, arbitrum, optimism, polygon, base, sepolia, arbitrumSepolia, optimismSepolia, baseSepolia } from 'viem/chains';
 import { ArbitrageOpportunity, detectArbitrageOpportunities } from './priceFetcher';
 import { transactionHistory, getExplorerUrl } from './transactionHistory';
+import { lifiService } from './lifi';
 
-// Initialize LI.FI SDK
+// Initialize LI.FI SDK (for executeRoute - lifiService uses Arc for getQuote)
 const lifi = new LiFi({
   integrator: 'lifi-agents-orchestrator',
 });
@@ -212,7 +213,8 @@ export async function createArbitragePlan(
   // The route will automatically find the best path including swaps and bridges
   
   try {
-    const quote = await lifi.getQuote({
+    // Use lifiService (Arc/CCTP for USDC routes) instead of direct lifi.getQuote
+    const quote = await lifiService.getQuote({
       fromChain: opportunity.fromChain,
       toChain: opportunity.toChain,
       fromToken: sourceToken.address,
@@ -220,8 +222,6 @@ export async function createArbitragePlan(
       fromAmount: inputAmount,
       fromAddress: walletAddress,
       toAddress: walletAddress,
-      // Ask for the best rate
-      slippage: 0.005, // 0.5% slippage
     });
     
     if (!quote) {

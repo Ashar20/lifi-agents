@@ -7,8 +7,9 @@ import { BrowserProvider } from 'ethers';
 import { createPublicClient, http, formatUnits, parseUnits, Address, erc20Abi } from 'viem';
 import { mainnet, arbitrum, optimism, polygon, base, sepolia, arbitrumSepolia, optimismSepolia, baseSepolia } from 'viem/chains';
 import { transactionHistory, getExplorerUrl } from './transactionHistory';
+import { lifiService } from './lifi';
 
-// Initialize LI.FI SDK
+// Initialize LI.FI SDK (for executeRoute - lifiService uses Arc for getQuote)
 const lifi = new LiFi({
   integrator: 'lifi-agents-orchestrator',
 });
@@ -395,7 +396,8 @@ export async function calculateRotationPlan(
     // Only get route if cross-chain transfer is needed
     if (position.chainId !== targetOpportunity.chainId) {
       try {
-        const quote = await lifi.getQuote({
+        // Use lifiService (Arc/CCTP for USDC routes) instead of direct lifi.getQuote
+        const quote = await lifiService.getQuote({
           fromChain: position.chainId,
           toChain: targetOpportunity.chainId,
           fromToken: position.tokenAddress,

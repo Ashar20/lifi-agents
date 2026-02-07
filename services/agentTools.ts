@@ -76,7 +76,7 @@ export function createAgentTools(context: AgentContext) {
 
     getSwapQuote: tool({
       description:
-        'Get a cross-chain swap/bridge quote via LI.FI. Use when the user wants to swap or bridge tokens (e.g. USDC from Ethereum to Arbitrum). Amount is in human units (e.g. 100 for 100 USDC).',
+        'Get a cross-chain swap/bridge quote via LI.FI. For USDC transfers, uses Arc (Circle CCTP) for native burn/mint. Use when the user wants to swap or bridge tokens (e.g. USDC from Ethereum to Arbitrum). Amount is in human units (e.g. 100 for 100 USDC).',
       inputSchema: z.object({
         fromChain: z
           .string()
@@ -105,7 +105,8 @@ export function createAgentTools(context: AgentContext) {
           return { error: 'Amount must be greater than 0.' };
         }
         try {
-          const quote = await lifiService.getQuote({
+          // getQuoteWithArcInfo forces Arc/CCTP for USDC routes; returns arcInfo for display
+          const result = await lifiService.getQuoteWithArcInfo({
             fromChain: fromChainId,
             toChain: toChainId,
             fromToken: fromAddr,
@@ -114,6 +115,7 @@ export function createAgentTools(context: AgentContext) {
             fromAddress: walletAddress,
             toAddress: toAddress || walletAddress,
           });
+          const quote = result?.quote;
           if (!quote) {
             return { error: 'No route found for this swap.' };
           }
@@ -121,13 +123,17 @@ export function createAgentTools(context: AgentContext) {
           const toAmountFormatted = toAmount
             ? (parseFloat(toAmount) / 1e6).toFixed(2)
             : 'N/A';
+          const arcNote = result?.isArcRoute
+            ? ' (via Arc/CCTP - native USDC burn/mint)'
+            : '';
           return {
             fromChain,
             toChain,
             fromAmount: amount,
             toAmountEstimate: toAmountFormatted,
             routeFound: true,
-            message: `Quote: ${amount} ${fromToken} on ${fromChain} → ~${toAmountFormatted} ${toToken} on ${toChain}`,
+            usesArc: result?.isArcRoute ?? false,
+            message: `Quote: ${amount} ${fromToken} on ${fromChain} → ~${toAmountFormatted} ${toToken} on ${toChain}${arcNote}`,
           };
         } catch (err: any) {
           return {

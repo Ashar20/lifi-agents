@@ -32,5 +32,4 @@ dist-ssr
 build
 *.tsbuildinfo
 
-# Reference folder (legacy)
-GalaxyAgents-main/
+
