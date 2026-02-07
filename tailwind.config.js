@@ -21,8 +21,11 @@ export default {
       },
       fontFamily: {
         mono: ['Rajdhani', 'monospace'],
-        sans: ['Inter', 'sans-serif'],
+        sans: ['Spectral', 'sans-serif'],
         display: ['Space Grotesk', 'sans-serif'],
+        'dune-rise': ['DuneRise', 'Cinzel', 'serif'],
+        'dune-tech': ['Orbitron', 'sans-serif'],
+        dune: ['Cinzel', 'serif'],
       },
       animation: {
         'gradient-flow': 'gradient-flow 3s ease infinite',
