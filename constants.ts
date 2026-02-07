@@ -1,5 +1,8 @@
 import { AgentRole, AgentMetadata } from './types';
 
+/** LI.FI SDK integrator: max 23 chars, alphanumeric + hyphens/underscores/dots */
+export const LIFI_INTEGRATOR = 'lifi-agents-orch';
+
 export const AGENTS: AgentMetadata[] = [
   {
     id: 'a0',

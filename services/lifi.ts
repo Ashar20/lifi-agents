@@ -5,6 +5,7 @@
 
 import { LiFi, Route, Chain, Token, convertQuoteToRoute } from '@lifi/sdk';
 import type { LifiStep, TokenAmount } from '@lifi/types';
+import { LIFI_INTEGRATOR } from '../constants';
 import {
   canUseArcRoute,
   getArcTransferInfo,
@@ -89,13 +90,15 @@ async function getERC20BalanceDirect(
 }
 
 // Initialize SDK with LiFi class (SDK v2.x API) and RPC config
-// Note: integrator name must be max 23 characters
-// SDK expects single RPC URL per chain, so we use the first (primary) URL
-const lifi = new LiFi({
-  integrator: 'lifi-agents-orch',
-  rpcUrls: Object.fromEntries(
-    Object.entries(RPC_URLS).map(([chainId, urls]) => [chainId, urls[0]])
-  ),
+// Note: integrator name must be max 23 characters (alphanumeric, -, _, .)
+// SDK uses singleton ConfigService - import lifi.ts first in index.tsx to set integrator before any other module
+const rpcs: Record<number, string[]> = {};
+Object.entries(RPC_URLS).forEach(([chainId, urls]) => {
+  rpcs[Number(chainId)] = [urls[0]];
+});
+export const lifi = new LiFi({
+  integrator: LIFI_INTEGRATOR,
+  rpcs,
 });
 
 // Adapter: Convert viem WalletClient to ethers-compatible signer for LI.FI SDK
@@ -512,8 +515,18 @@ export const lifiService = {
     } catch (error: any) {
       console.error('[LI.FI] Error getting quote:', error);
       console.error('[LI.FI] Error details:', error?.message, error?.response?.data || error?.cause);
-      // Re-throw with more context so callers can see what went wrong
-      throw new Error(`LI.FI quote failed: ${error?.message || 'Unknown error'}`);
+
+      // Extract meaningful error message from various SDK/API error shapes
+      let errMsg = error?.message || 'Unknown error';
+      const data = error?.response?.data || error?.data || error?.body;
+      if (typeof data === 'object') {
+        errMsg = data?.message || data?.error || data?.msg || errMsg;
+      }
+      if (error?.cause?.message) errMsg = error.cause.message;
+      if (errMsg === 'Something went wrong' || errMsg === 'Unknown error') {
+        errMsg += ' — Try ≥10 USDC (bridges often need 10–25+ USDC) or verify wallet balance';
+      }
+      throw new Error(`LI.FI quote failed: ${errMsg}`);
     }
   },
 

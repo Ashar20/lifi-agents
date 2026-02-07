@@ -2,18 +2,12 @@
 // NO MOCKS - Real LI.FI execution on testnet/mainnet
 // SDK v2: executeRoute(signer, route, settings) - https://docs.li.fi/sdk/execute-routes
 
-import { LiFi, ChainId, convertQuoteToRoute } from '@lifi/sdk';
+import { ChainId, convertQuoteToRoute } from '@lifi/sdk';
 import { BrowserProvider } from 'ethers';
 import { createPublicClient, http, formatUnits, parseUnits, Address, erc20Abi } from 'viem';
 import { mainnet, arbitrum, optimism, polygon, base, sepolia, arbitrumSepolia, optimismSepolia, baseSepolia } from 'viem/chains';
 import { transactionHistory, getExplorerUrl } from './transactionHistory';
-import { lifiService } from './lifi';
-
-// Initialize LI.FI SDK (for executeRoute - lifiService uses Arc for getQuote)
-// Note: integrator name must be max 23 characters
-const lifi = new LiFi({
-  integrator: 'lifi-agents-orch',
-});
+import { lifiService, lifi } from './lifi';
 
 // Supported chains configuration with fallback RPCs
 export const SUPPORTED_CHAINS = {
@@ -458,7 +452,7 @@ export async function fetchYieldOpportunities(
       // Basic filters
       if (!supportedChainNames.includes(chain)) return false;
       if (!supportedTokens.some(t => symbol.includes(t))) return false;
-      if (apy < 0.5 || apy > 500) return false; // Filter out < 0.5% and absurd yields
+      if (apy < 0.5 || apy > 100) return false; // Filter out < 0.5% and bloated yields (>100% usually unsustainable)
       if (tvl < 500000) return false; // Min $500k TVL
 
       return true;

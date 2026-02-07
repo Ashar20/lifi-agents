@@ -44,10 +44,12 @@ async function fetchDefiLlamaYields(): Promise<YieldOpportunity[]> {
       .filter((pool: any) => {
         const chain = pool.chain || '';
         const symbol = pool.symbol || '';
+        const apy = pool.apy || 0;
         return (
           supportedChains.includes(chain) &&
           supportedTokens.some(token => symbol.toUpperCase().includes(token)) &&
-          pool.apy > 0.1 && // Filter out near-zero APYs
+          apy > 0.1 && // Filter out near-zero APYs
+          apy <= 100 && // Filter bloated/inflationary APYs (>100% is usually unsustainable)
           pool.tvlUsd > 100000 // Filter out small pools (< $100k TVL)
         );
       })

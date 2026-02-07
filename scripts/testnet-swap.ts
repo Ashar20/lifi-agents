@@ -17,9 +17,9 @@ const SEPOLIA_CHAIN_ID = 11155111;
 const SEPOLIA_USDC = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'; // Circle USDC on Sepolia
 const SEPOLIA_WETH = '0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14'; // Wrapped ETH on Sepolia
 
-// Initialize LI.FI SDK
+// Initialize LI.FI SDK (integrator max 23 chars)
 const lifi = new LiFi({
-  integrator: 'lifi-agents-testnet-swap',
+  integrator: 'lifi-agents-testnet',
 });
 
 // RPC endpoint for Sepolia

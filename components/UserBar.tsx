@@ -48,13 +48,14 @@ const UserBar: React.FC<UserBarProps> = ({ onLogoClick, onLogout, onReset, taskR
               RESET
             </button>
           )}
-          {taskResultsCount > 0 && onShowDashboard && (
+          {onShowDashboard && (
             <button
               onClick={onShowDashboard}
               className="flex items-center gap-2 px-3 py-2 rounded text-xs font-mono bg-neural-purple/10 hover:bg-neural-purple/20 border border-neural-purple/30 text-neural-purple transition-all"
+              title="View operations, logs & agent status"
             >
               <Activity size={14} />
-              DASHBOARD ({taskResultsCount})
+              DASHBOARD {taskResultsCount > 0 ? `(${taskResultsCount})` : ''}
             </button>
           )}
           {/* Wallet Connection */}

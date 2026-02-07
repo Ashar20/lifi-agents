@@ -22,6 +22,12 @@ const SYSTEM_PROMPT = `You are a DeFi assistant for the LI.FI Agents Orchestrato
 
 Use the tools to fetch real data before answering. Be concise and human. When the user asks about their balance, yields, or swaps, call the appropriate tool first, then summarize the results in a friendly way.
 
+AGENT PIPELINE (7 agents work directly): When the user asks for yield, arbitrage, portfolio check, rebalancing, or "make best use of" funds—call deployAgents FIRST, then runAgentPipeline with intentType matching the request (yield_optimization, arbitrage, portfolio_check, rebalancing, swap, monitoring, or general) and userMessage set to the user's exact message. The 7 agents (Paul Atreides, Chani, Irulan, Liet-Kynes, Duncan Idaho, Thufir Hawat, Stilgar) will run their tasks and return real results. Summarize the agent outputs for the user.
+
+Deploy agents: When the user says "make best use of X from my wallet", "optimize my funds", "put my USDC to work", or similar—call deployAgents FIRST to activate the agent team on the Flow Canvas, then runAgentPipeline (not getBestYields alone) so the agents do the work.
+
+Workflow execution: When the user says "do the workflow", "execute", "run it", "implement it", "deposit to best yield", or similar—call executeYieldWorkflow. Yields shown are capped at 100% APY (we filter bloated/inflationary data).
+
 Swap rules:
 - USDC→USDC (chain to chain): Uses Arc (Circle CCTP). Any amount.
 - USDC→ETH, ETH→USDC, etc.: Uses LI.FI to find best route. Always use getSwapQuote - we support USDC, ETH, WETH, USDT, DAI.
@@ -39,7 +45,12 @@ const google = createGoogleGenerativeAI({
 
 const DEMO_WALLET = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
 
-export function useAgentChat(walletAddress: string | undefined) {
+export function useAgentChat(
+  walletAddress: string | undefined,
+  walletClient?: any,
+  onDeployAgents?: () => void,
+  onRunAgentPipeline?: (intentType: string, userMessage?: string) => Promise<{ success: boolean; summary: string; agentOutputs: Record<string, string> }>
+) {
   const effectiveAddress = walletAddress || DEMO_WALLET;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -60,7 +71,12 @@ export function useAgentChat(walletAddress: string | undefined) {
       setError(null);
 
       try {
-        const tools = createAgentTools({ walletAddress: effectiveAddress });
+        const tools = createAgentTools({
+          walletAddress: effectiveAddress,
+          walletClient,
+          onDeployAgents,
+          onRunAgentPipeline,
+        });
 
         const apiMessages = [
           ...messages
@@ -78,7 +94,7 @@ export function useAgentChat(walletAddress: string | undefined) {
           system: SYSTEM_PROMPT,
           messages: apiMessages,
           tools,
-          stopWhen: stepCountIs(5),
+          stopWhen: stepCountIs(7),
         });
 
         const assistantMsg: ChatMessage = {
@@ -102,7 +118,7 @@ export function useAgentChat(walletAddress: string | undefined) {
         setIsLoading(false);
       }
     },
-    [effectiveAddress, messages, isLoading]
+    [effectiveAddress, walletClient, onDeployAgents, onRunAgentPipeline, messages, isLoading]
   );
 
   const clearMessages = useCallback(() => {

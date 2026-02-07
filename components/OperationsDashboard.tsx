@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { AgentTaskResult, AgentMetadata } from '../types';
-import { Shield, Search, Target, Zap, Clock, CheckCircle, XCircle, AlertCircle, DollarSign, Activity, Server, ChevronDown, ChevronUp, Users, TrendingUp, Radio, Brain, Database, Bell, ArrowLeft, BarChart3, ListChecks } from 'lucide-react';
+import { AgentTaskResult, AgentMetadata, LogMessage } from '../types';
+import { Shield, Search, Target, Zap, Clock, CheckCircle, XCircle, AlertCircle, DollarSign, Activity, Server, ChevronDown, ChevronUp, Users, TrendingUp, Radio, Brain, Database, Bell, ArrowLeft, BarChart3, ListChecks, Terminal } from 'lucide-react';
 import { AGENT_ABILITIES } from '../constants';
 import LottieAvatar from './LottieAvatar';
 
@@ -11,6 +11,10 @@ interface OperationsDashboardProps {
   activeAgents?: string[];
   agentConnections?: Array<{source: string, target: string}>;
   agentStatuses?: Record<string, 'idle' | 'negotiating' | 'streaming' | 'offline'>;
+  /** When true, fits in a panel instead of full screen */
+  embedded?: boolean;
+  /** System logs for the Logs tab */
+  logs?: LogMessage[];
 }
 
 export const OperationsDashboard: React.FC<OperationsDashboardProps> = ({ 
@@ -19,9 +23,11 @@ export const OperationsDashboard: React.FC<OperationsDashboardProps> = ({
   onBack, 
   activeAgents = [],
   agentConnections = [],
-  agentStatuses = {}
+  agentStatuses = {},
+  embedded = false,
+  logs = []
 }) => {
-  const [activeTab, setActiveTab] = useState<'hierarchy' | 'results'>('hierarchy');
+  const [activeTab, setActiveTab] = useState<'hierarchy' | 'results' | 'logs'>('hierarchy');
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set(['a0']));
   const [expandedResults, setExpandedResults] = useState<Set<number>>(new Set());
   const [totalCost, setTotalCost] = useState(0);
@@ -212,7 +218,7 @@ export const OperationsDashboard: React.FC<OperationsDashboardProps> = ({
   });
 
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-gray-900 via-black to-gray-900 overflow-hidden">
+    <div className={`flex flex-col bg-gradient-to-br from-gray-900 via-black to-gray-900 overflow-hidden ${embedded ? 'min-h-0 flex-1' : 'h-screen'}`}>
       {/* Header */}
       <div className="bg-gradient-to-r from-neon-green/20 to-transparent border-b border-neon-green/50 p-6 backdrop-blur-md flex-shrink-0">
         <div className="max-w-7xl mx-auto">
@@ -303,6 +309,17 @@ export const OperationsDashboard: React.FC<OperationsDashboardProps> = ({
               <BarChart3 className="w-4 h-4" />
               TASK RESULTS ({results.length})
             </button>
+            <button
+              onClick={() => setActiveTab('logs')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-mono text-sm transition-all ${
+                activeTab === 'logs'
+                  ? 'bg-neon-green/20 border-2 border-neon-green text-neon-green'
+                  : 'bg-black/40 border-2 border-gray-700 text-gray-400 hover:border-gray-600'
+              }`}
+            >
+              <Terminal className="w-4 h-4" />
+              SYSTEM LOGS ({logs.length})
+            </button>
           </div>
         </div>
       </div>
@@ -310,7 +327,32 @@ export const OperationsDashboard: React.FC<OperationsDashboardProps> = ({
       {/* Content - Scrollable */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-7xl mx-auto p-6">
-        {activeTab === 'hierarchy' ? (
+        {activeTab === 'logs' ? (
+          // LOGS VIEW
+          <div className="bg-black/40 border border-neon-green/30 rounded-lg p-4 space-y-1.5 font-mono text-xs">
+            <div className="flex items-center gap-2 mb-3 text-neon-green">
+              <Terminal className="w-4 h-4" />
+              <span className="font-bold">LIVE SYSTEM LOGS</span>
+            </div>
+            {logs.length === 0 ? (
+              <p className="text-gray-500">No logs yet. Start a workflow to see activity.</p>
+            ) : (
+              logs.map((log) => (
+                <div key={log.id} className="flex items-start gap-3 p-2 rounded hover:bg-white/5">
+                  <span className="text-gray-500 min-w-[60px] flex-shrink-0">{log.timestamp}</span>
+                  <span className={`flex-shrink-0 ${
+                    log.type === 'A2A' ? 'text-blue-400' :
+                    log.type === 'COMMANDER' ? 'text-neon-green' :
+                    log.type === 'x402' ? 'text-yellow-400' : 'text-gray-400'
+                  }`}>
+                    {log.type === 'A2A' ? 'A2A' : log.type === 'COMMANDER' ? 'CMD' : log.type === 'x402' ? 'x402' : 'SYS'}
+                  </span>
+                  <span className="break-all text-gray-300">{log.content}</span>
+                </div>
+              ))
+            )}
+          </div>
+        ) : activeTab === 'hierarchy' ? (
           // HIERARCHY VIEW
           sortedAgentIds.length === 0 ? (
             <div className="text-center py-20">

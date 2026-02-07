@@ -332,7 +332,7 @@ const FlowCanvas: React.FC<FlowCanvasProps> = ({
   );
 
   return (
-    <div className="w-full h-full bg-[#050505] relative">
+    <div className="w-full h-full min-h-[400px] bg-[#050505] relative" style={{ width: '100%', height: '100%' }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}

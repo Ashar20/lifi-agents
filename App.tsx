@@ -40,9 +40,6 @@ const App: React.FC = () => {
     return '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'; // Demo fallback
   }, [isConnected, connectedAddress]);
 
-  // Agent chat (Vercel AI SDK with LI.FI/DeFi tools) - must be early so callbacks can reference it
-  const agentChat = useAgentChat(getWalletAddressForAgents());
-
   // Auto-create guest session on first load
   useEffect(() => {
     if (!authService.isAuthenticated()) {
@@ -59,7 +56,7 @@ const App: React.FC = () => {
   }, [isConnected, connectedAddress]);
 
   const [showLanding, setShowLanding] = useState<boolean>(true);
-  const [rightPanelView, setRightPanelView] = useState<'chat' | 'yield' | 'arbitrage' | 'alerts' | 'history' | 'wallets' | 'registry'>('chat');
+  const [rightPanelView, setRightPanelView] = useState<'chat' | 'operations' | 'yield' | 'arbitrage' | 'alerts' | 'history' | 'wallets' | 'registry'>('chat');
 
   // --- State ---
   const [activeAgents, setActiveAgents] = useState<string[]>(() => {
@@ -126,6 +123,44 @@ const App: React.FC = () => {
   } | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
 
+  // Log helper (early for use in callbacks)
+  const addLog = useCallback((agent: string, message: string) => {
+    const newLog: LogMessage = {
+      id: `log_${Date.now()}_${Math.random()}`,
+      timestamp: new Date().toLocaleTimeString(),
+      type: agent === 'SYSTEM' ? 'SYSTEM' : agent === 'COMMANDER' ? 'COMMANDER' : 'A2A',
+      content: message
+    };
+    setLogs(prev => [...prev.slice(-99), newLog]);
+  }, []);
+
+  // Default workflow connections: Paul Atreides coordinates → others → Stilgar executes
+  const DEFAULT_AGENT_CONNECTIONS: Array<{ source: string; target: string }> = [
+    { source: 'a0', target: 'a1' },
+    { source: 'a0', target: 'a2' },
+    { source: 'a0', target: 'a3' },
+    { source: 'a1', target: 'a4' },
+    { source: 'a3', target: 'a4' },
+    { source: 'a2', target: 'a5' },
+    { source: 'a4', target: 'a6' },
+    { source: 'a5', target: 'a6' },
+    { source: 'a0', target: 'a6' },
+  ];
+
+  // Deploy all agents to orchestration window (called from chat when user says "make best use of X")
+  const handleDeployAgents = useCallback(() => {
+    const allIds = ['a0', 'a1', 'a2', 'a3', 'a4', 'a5', 'a6'];
+    setActiveAgents(allIds);
+    setPersistentEdges(DEFAULT_AGENT_CONNECTIONS);
+    localStorage.setItem('agentConnections', JSON.stringify(DEFAULT_AGENT_CONNECTIONS));
+    allIds.forEach((id) => {
+      setAgentStatuses((prev) => ({ ...prev, [id]: 'idle' }));
+    });
+    addLog('SYSTEM', '🤖 Agents deployed & connected: Paul Atreides → Chani, Irulan, Liet-Kynes → Duncan Idaho, Thufir Hawat → Stilgar');
+  }, [addLog]);
+
+  const agentChatRef = useRef<ReturnType<typeof useAgentChat> | null>(null);
+
   // --- Persist taskResults to localStorage ---
   useEffect(() => {
     localStorage.setItem('taskResults', JSON.stringify(taskResults));
@@ -184,6 +219,27 @@ const App: React.FC = () => {
     localStorage.setItem('activeAgents', JSON.stringify(activeAgents));
   }, [activeAgents]);
 
+  // Sync default connections when agents are deployed but connections are missing
+  useEffect(() => {
+    const allIds = ['a0', 'a1', 'a2', 'a3', 'a4', 'a5', 'a6'];
+    const hasAllAgents = allIds.every((id) => activeAgents.includes(id));
+    if (hasAllAgents && persistentEdges.length === 0) {
+      const defaultEdges = [
+        { source: 'a0', target: 'a1' },
+        { source: 'a0', target: 'a2' },
+        { source: 'a0', target: 'a3' },
+        { source: 'a1', target: 'a4' },
+        { source: 'a3', target: 'a4' },
+        { source: 'a2', target: 'a5' },
+        { source: 'a4', target: 'a6' },
+        { source: 'a5', target: 'a6' },
+        { source: 'a0', target: 'a6' },
+      ];
+      setPersistentEdges(defaultEdges);
+      localStorage.setItem('agentConnections', JSON.stringify(defaultEdges));
+    }
+  }, [activeAgents, persistentEdges.length]);
+
   // Random dialogue generator - makes agents chat periodically
   useEffect(() => {
     if (activeAgents.length === 0) return;
@@ -236,24 +292,13 @@ const App: React.FC = () => {
     };
   }, [activeAgents]);
 
-  // Log helper
-  const addLog = useCallback((agent: string, message: string) => {
-    const newLog: LogMessage = {
-      id: `log_${Date.now()}_${Math.random()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      type: agent === 'SYSTEM' ? 'SYSTEM' : agent === 'COMMANDER' ? 'COMMANDER' : 'A2A',
-      content: message
-    };
-    setLogs(prev => [...prev.slice(-99), newLog]);
-  }, []);
-
   // Workflow reset - clear all agents, connections, tasks, and logs
   const handleWorkflowReset = useCallback(() => {
     setActiveAgents([]);
     setPersistentEdges([]);
     setTaskResults([]);
     setLogs(INITIAL_LOGS);
-    agentChat.clearMessages();
+    agentChatRef.current?.clearMessages();
     setAgentStatuses({});
     setAgentProgress({});
     setSelectedAgentId(null);
@@ -267,7 +312,7 @@ const App: React.FC = () => {
     localStorage.removeItem('taskResults');
     addLog('SYSTEM', '🔄 Workflow reset. All agents deactivated, connections cleared.');
     toast.info('Workflow reset complete');
-  }, [addLog, agentChat]);
+  }, [addLog]);
 
   // Activate agent
   const handleActivateAgent = useCallback((agentId: string) => {
@@ -877,7 +922,7 @@ const App: React.FC = () => {
                 timestamp: Date.now(),
                 agentName: agent.name
               };
-              agentChat.appendMessage(successMessage);
+              agentChatRef.current?.appendMessage(successMessage);
 
               result = {
                 type: 'cross_chain_swap',
@@ -1008,6 +1053,7 @@ const App: React.FC = () => {
       setTimeout(() => setActiveDialogue(null), 2000);
 
       toast.success(`${agent.name}: Mission complete!`);
+      return taskResult;
     } catch (error) {
       console.error('Task execution error:', error);
       addLog('ERROR', `❌ ${agent.name} task failed: ${error}`);
@@ -1019,8 +1065,50 @@ const App: React.FC = () => {
       });
 
       toast.error(`Task failed for ${agent.name}`);
+      return undefined;
     }
   }, [addLog, getWalletAddressForAgents, walletClient]);
+
+  // Run agent pipeline from chat - agents work directly on user request
+  const handleRunAgentPipeline = useCallback(
+    async (intentType: string, userMessage?: string): Promise<{ success: boolean; summary: string; agentOutputs: Record<string, string> }> => {
+      const { parseIntent } = await import('./services/intentParser');
+      const canonical: Record<string, string> = { yield_optimization: 'find best yield', arbitrage: 'find arbitrage', rebalancing: 'rebalance portfolio', portfolio_check: 'check my balance', swap: 'swap usdc', monitoring: 'monitor positions', general: 'optimize my funds' };
+      const intent = parseIntent(userMessage || canonical[intentType] || intentType);
+      const agentOrder = intent.requiredAgents.filter((id) => id !== 'a0'); // Skip Commander for now; run specialists first
+      if (intent.requiredAgents.includes('a0')) {
+        agentOrder.unshift('a0'); // Paul Atreides leads
+      }
+      const agentOutputs: Record<string, string> = {};
+      const taskDescription = userMessage || intent.description;
+      for (const agentId of agentOrder) {
+        try {
+          const result = await executeAgentTask(agentId, taskDescription);
+          if (result?.summary) {
+            const agent = AGENTS.find((a) => a.id === agentId);
+            agentOutputs[agent?.name || agentId] = result.summary;
+          }
+        } catch (e) {
+          const agent = AGENTS.find((a) => a.id === agentId);
+          agentOutputs[agent?.name || agentId] = `Error: ${(e as Error).message}`;
+        }
+      }
+      const summary = Object.entries(agentOutputs)
+        .map(([name, out]) => `${name}: ${out}`)
+        .join('\n');
+      return { success: summary.length > 0, summary, agentOutputs };
+    },
+    [executeAgentTask]
+  );
+
+  // Agent chat (Vercel AI SDK with LI.FI/DeFi tools)
+  const agentChat = useAgentChat(
+    getWalletAddressForAgents(),
+    walletClient ?? undefined,
+    handleDeployAgents,
+    handleRunAgentPipeline
+  );
+  agentChatRef.current = agentChat;
 
   // Handle execution confirmation
   const handleConfirmExecution = useCallback(async () => {
@@ -1045,7 +1133,7 @@ const App: React.FC = () => {
       setPendingExecution(null);
 
       // Add success message to chat
-      agentChat.appendMessage({
+      agentChatRef.current?.appendMessage({
         type: 'agent',
         content: `${AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar'}: ✅ Transaction executed successfully! ${pendingExecution.summary}. TX hash: ${(result.transactionHash || result.hash || 'pending').slice(0, 10)}...`,
         agentName: AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar'
@@ -1058,7 +1146,7 @@ const App: React.FC = () => {
     } finally {
       setIsExecuting(false);
     }
-  }, [pendingExecution, walletClient, addLog, agentChat]);
+  }, [pendingExecution, walletClient, addLog]);
 
   // Cancel pending execution
   const handleCancelExecution = useCallback(() => {
@@ -1151,8 +1239,30 @@ const App: React.FC = () => {
       <div className="flex-1 flex overflow-hidden relative z-10 min-h-0">
         {/* Center: Flow Canvas & Console */}
         <div className="flex-1 flex flex-col overflow-hidden relative min-h-0">
-          {/* Canvas */}
-          <div className="flex-1 relative">
+          {/* Deployed agents tags strip */}
+          {activeAgents.length > 0 && (
+            <div className="flex-shrink-0 px-4 py-2 bg-black/30 border-b border-neon-green/20 flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] font-mono text-neon-green/80 uppercase tracking-wider">Deployed:</span>
+              {activeAgents.map((id) => {
+                const agent = AGENTS.find((a) => a.id === id);
+                return agent ? (
+                  <span
+                    key={id}
+                    onClick={() => setSelectedAgentId(id)}
+                    className={`px-2 py-1 rounded text-[10px] font-mono cursor-pointer transition-all ${
+                      selectedAgentId === id
+                        ? 'bg-neon-green/30 text-neon-green border border-neon-green/50'
+                        : 'bg-white/5 text-gray-300 border border-white/10 hover:bg-neon-green/10 hover:text-neon-green hover:border-neon-green/30'
+                    }`}
+                  >
+                    {agent.name}
+                  </span>
+                ) : null;
+              })}
+            </div>
+          )}
+          {/* Canvas - explicit min-height for React Flow */}
+          <div className="flex-1 relative min-h-[400px]">
             <FlowCanvas
               agents={AGENTS}
               activeAgents={activeAgents}
@@ -1197,6 +1307,17 @@ const App: React.FC = () => {
                 }`}
             >
               INTENT CHAT
+            </button>
+            <button
+              onClick={() => setRightPanelView('operations')}
+              className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'operations'
+                ? 'bg-green-500/10 text-green-400 border-b-2 border-green-400'
+                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+              title="View operations & agent status"
+            >
+              <Activity size={14} />
+              OPS
             </button>
             <button
               onClick={() => setRightPanelView('yield')}
@@ -1262,7 +1383,20 @@ const App: React.FC = () => {
 
           {/* Panel Content - Takes remaining space */}
           <div className="flex-1 min-h-0 overflow-hidden">
-            {rightPanelView === 'chat' ? (
+            {rightPanelView === 'operations' ? (
+              <div className="h-full overflow-y-auto flex flex-col">
+                <OperationsDashboard
+                  agents={AGENTS}
+                  results={taskResults}
+                  onBack={() => setRightPanelView('chat')}
+                  activeAgents={activeAgents}
+                  agentConnections={persistentEdges}
+                  agentStatuses={agentStatuses}
+                  logs={logs}
+                  embedded
+                />
+              </div>
+            ) : rightPanelView === 'chat' ? (
               <IntentChat
                 onIntentSubmit={agentChat.submit}
                 messages={agentChat.messages}
@@ -1396,6 +1530,7 @@ const App: React.FC = () => {
           activeAgents={activeAgents}
           agentConnections={persistentEdges}
           agentStatuses={agentStatuses}
+          logs={logs}
         />
       )}
 

@@ -9,6 +9,7 @@ import {
   getYieldComparison,
   type YieldOpportunity,
 } from './yieldFetcher';
+import { oneClickYieldRotation } from './yieldRotation';
 
 // Chain name → chain ID
 const CHAIN_IDS: Record<string, number> = {
@@ -80,10 +81,13 @@ function resolveChainId(chain: string | number): number {
 
 export interface AgentContext {
   walletAddress: string;
+  walletClient?: any;
+  onDeployAgents?: () => void;
+  onRunAgentPipeline?: (intentType: string, userMessage?: string) => Promise<{ success: boolean; summary: string; agentOutputs: Record<string, string> }>;
 }
 
 export function createAgentTools(context: AgentContext) {
-  const { walletAddress } = context;
+  const { walletAddress, walletClient, onDeployAgents, onRunAgentPipeline } = context;
 
   return {
     getUSDCBalances: tool({
@@ -264,6 +268,105 @@ export function createAgentTools(context: AgentContext) {
             : null,
           yieldCount: result.yields.length,
         };
+      },
+    }),
+
+    deployAgents: tool({
+      description:
+        'Deploy/activate all agents in the orchestration window. Use when user says "make best use of", "optimize my funds", "put my USDC to work", or similar—to show the agent team (Paul Atreides, Chani, Irulan, Liet-Kynes, Duncan Idaho, Thufir Hawat, Stilgar) on the Flow Canvas before executing.',
+      inputSchema: z.object({}),
+      execute: async () => {
+        if (onDeployAgents) {
+          onDeployAgents();
+          return { success: true, message: 'Agents deployed to orchestration window.' };
+        }
+        return { success: false, error: 'Deploy not available.' };
+      },
+    }),
+
+    runAgentPipeline: tool({
+      description:
+        'Run the 7 agents directly on the user request. Each agent (Chani, Irulan, Liet-Kynes, Duncan Idaho, Thufir Hawat, Stilgar) performs their job (arbitrage, portfolio, yield, risk, rebalancing, execution). Use when user asks for yield, arbitrage, portfolio check, rebalancing, or "make best use of" - AFTER deployAgents. Pass the user message to determine intent.',
+      inputSchema: z.object({
+        intentType: z
+          .enum(['yield_optimization', 'arbitrage', 'rebalancing', 'portfolio_check', 'swap', 'monitoring', 'general'])
+          .describe('Intent: yield_optimization, arbitrage, rebalancing, portfolio_check, swap, monitoring, or general'),
+        userMessage: z.string().optional().describe('The user message (e.g. "find best yield for my USDC") to parse intent from'),
+      }),
+      execute: async ({ intentType, userMessage }) => {
+        if (!onRunAgentPipeline) {
+          return { success: false, error: 'Agent pipeline not available.' };
+        }
+        try {
+          const result = await onRunAgentPipeline(intentType, userMessage);
+          return {
+            success: result.success,
+            summary: result.summary,
+            agentOutputs: result.agentOutputs,
+            message: result.summary ? `Agents completed:\n${result.summary}` : 'No agent output.',
+          };
+        } catch (err: any) {
+          return { success: false, error: err?.message || 'Pipeline failed.' };
+        }
+      },
+    }),
+
+    executeYieldWorkflow: tool({
+      description:
+        'Execute the yield workflow: find best opportunity and move USDC to the highest-yielding protocol. Use when user says "do the workflow", "execute", "deposit to best yield", "run it", "put my USDC there", or "implement it". Requires connected wallet for signing.',
+      inputSchema: z.object({
+        maxGasCost: z
+          .number()
+          .optional()
+          .default(50)
+          .describe('Max gas cost in USD (default 50)'),
+        minApyImprovement: z
+          .number()
+          .optional()
+          .default(2)
+          .describe('Min APY improvement % over current position (default 2)'),
+      }),
+      execute: async ({ maxGasCost, minApyImprovement }) => {
+        if (!walletClient?.account?.address) {
+          return {
+            success: false,
+            error: 'Connect your wallet to execute. Click Connect Wallet in the app, then try again.',
+          };
+        }
+        const addr = (walletAddress || walletClient.account.address || '').trim();
+        if (!addr || !addr.startsWith('0x')) {
+          return { success: false, error: 'No wallet address. Connect a wallet first.' };
+        }
+        try {
+          const statuses: string[] = [];
+          const result = await oneClickYieldRotation(addr as `0x${string}`, walletClient, {
+            minApyImprovement,
+            maxGasCost,
+            onStatusUpdate: (s) => statuses.push(s),
+          });
+          if (result.success) {
+            const txHash = result.result?.txHash;
+            return {
+              success: true,
+              message: `Yield rotation executed! ${result.plan?.toOpportunity.protocol} on ${result.plan?.toOpportunity.chainName} (+${result.plan?.apyImprovement.toFixed(2)}% APY).`,
+              txHash: txHash || null,
+              plan: result.plan
+                ? {
+                    protocol: result.plan.toOpportunity.protocol,
+                    chain: result.plan.toOpportunity.chainName,
+                    apyImprovement: result.plan.apyImprovement.toFixed(2) + '%',
+                  }
+                : null,
+            };
+          }
+          return {
+            success: false,
+            error: result.error || 'Execution failed',
+          };
+        } catch (err: any) {
+          const msg = err?.message || err?.cause?.message || 'Execution failed';
+          return { success: false, error: msg };
+        }
       },
     }),
   };
