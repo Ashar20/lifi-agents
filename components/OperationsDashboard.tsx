@@ -160,7 +160,7 @@ export const OperationsDashboard: React.FC<OperationsDashboardProps> = ({
       'a5': 'Monitor portfolio allocations and detect drift. Maintain target allocations across chains. Protect portfolio from imbalance.',
       'a6': 'Execute LI.FI routes with minimal latency. Send execution status updates. Maximum speed delivery required.'
     };
-    return orders[agentId] || 'Standby for orders from Route Strategist.';
+    return orders[agentId] || 'Standby for orders from Paul Atreides.';
   };
 
   const getSubordinates = (agentId: string) => {

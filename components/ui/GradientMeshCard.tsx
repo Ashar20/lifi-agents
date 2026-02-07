@@ -4,25 +4,25 @@ interface GradientMeshCardProps {
     children: React.ReactNode;
     className?: string;
     onClick?: () => void;
-    variant?: 'purple' | 'cyan' | 'amber';
+    variant?: 'spice' | 'sand' | 'fremen';
 }
 
 const GradientMeshCard: React.FC<GradientMeshCardProps> = ({
     children,
     className = "",
     onClick,
-    variant = 'purple'
+    variant = 'spice'
 }) => {
     const gradients = {
-        purple: 'from-neural-purple/20 via-neural-purple/10 to-transparent',
-        cyan: 'from-neural-cyan/20 via-neural-cyan/10 to-transparent',
-        amber: 'from-neural-amber/20 via-neural-amber/10 to-transparent',
+        spice: 'from-spice-orange/20 via-spice-orange/10 to-transparent',
+        sand: 'from-desert-sand/20 via-desert-sand/10 to-transparent',
+        fremen: 'from-fremen-blue/20 via-fremen-blue/10 to-transparent',
     };
 
     const borderColors = {
-        purple: 'border-neural-purple/30',
-        cyan: 'border-neural-cyan/30',
-        amber: 'border-neural-amber/30',
+        spice: 'border-spice-orange/30',
+        sand: 'border-desert-sand/30',
+        fremen: 'border-fremen-blue/30',
     };
 
     return (
@@ -30,14 +30,14 @@ const GradientMeshCard: React.FC<GradientMeshCardProps> = ({
             onClick={onClick}
             className={`relative overflow-hidden rounded-xl border ${borderColors[variant]} bg-gradient-to-br ${gradients[variant]} backdrop-blur-sm transition-all duration-300 ${onClick ? 'cursor-pointer hover:scale-[1.02]' : ''} ${className}`}
         >
-            {/* Animated gradient mesh overlay */}
+            {/* Animated desert gradient mesh overlay */}
             <div
                 className="absolute inset-0 opacity-30 pointer-events-none"
                 style={{
                     background: `
-            radial-gradient(circle at 20% 50%, rgba(99, 102, 241, 0.3) 0%, transparent 50%),
-            radial-gradient(circle at 80% 80%, rgba(6, 182, 212, 0.3) 0%, transparent 50%),
-            radial-gradient(circle at 40% 20%, rgba(245, 158, 11, 0.2) 0%, transparent 50%)
+            radial-gradient(circle at 20% 50%, rgba(216, 67, 21, 0.3) 0%, transparent 50%),
+            radial-gradient(circle at 80% 80%, rgba(141, 110, 99, 0.3) 0%, transparent 50%),
+            radial-gradient(circle at 40% 20%, rgba(215, 204, 200, 0.2) 0%, transparent 50%)
           `,
                     backgroundSize: '200% 200%',
                     animation: 'gradient-flow 8s ease infinite',

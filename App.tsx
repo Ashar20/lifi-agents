@@ -4,24 +4,22 @@ import { AGENTS, INITIAL_LOGS, AGENT_ABILITIES } from './constants';
 import { AgentMetadata, LogMessage, AgentTaskResult } from './types';
 import UserBar from './components/UserBar';
 import FlowCanvas from './components/FlowCanvas';
-import AgentCard from './components/AgentCard';
 import ConsolePanel from './components/ConsolePanel';
 import AgentDetailPanel from './components/AgentDetailPanel';
 import { AgentDialogue } from './components/AgentDialogue';
 import { OperationsDashboard } from './components/OperationsDashboard';
-import { AgentProgressBar } from './components/AgentProgressBar';
-import { CaptainControlPanel } from './components/CaptainControlPanel';
 import { IntentChat } from './components/IntentChat';
 import { OneClickYield } from './components/OneClickYield';
 import { ArbitrageExecutor } from './components/ArbitrageExecutor';
 import { NotificationSettings } from './components/NotificationSettings';
 import { TransactionHistory } from './components/TransactionHistory';
 import { MultiWalletManager } from './components/MultiWalletManager';
+import { AgentRegistry } from './components/AgentRegistry';
 import LandingPage from './components/LandingPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import ParticleNetwork from './components/ui/ParticleNetwork';
+import DesertDust from './components/ui/DesertDust';
 import RippleButton from './components/ui/RippleButton';
-import { Activity, Zap, ArrowRightLeft, Bell, History, Wallet } from 'lucide-react';
+import { Activity, Zap, ArrowRightLeft, Bell, History, Wallet, Tag } from 'lucide-react';
 import { orchestrator, agentStatusManager, geminiService } from './services/api';
 import { authService } from './services/auth';
 import { useAgentChat } from './hooks/useAgentChat';
@@ -61,7 +59,7 @@ const App: React.FC = () => {
   }, [isConnected, connectedAddress]);
 
   const [showLanding, setShowLanding] = useState<boolean>(true);
-  const [rightPanelView, setRightPanelView] = useState<'chat' | 'yield' | 'arbitrage' | 'alerts' | 'history' | 'wallets'>('chat');
+  const [rightPanelView, setRightPanelView] = useState<'chat' | 'yield' | 'arbitrage' | 'alerts' | 'history' | 'wallets' | 'registry'>('chat');
 
   // --- State ---
   const [activeAgents, setActiveAgents] = useState<string[]>(() => {
@@ -397,7 +395,7 @@ const App: React.FC = () => {
         if (opportunities.length > 0) {
           const topOpportunity = opportunities[0];
           const analysis = await geminiService.chat({
-            prompt: `You're Arbitrage Hunter, a friendly DeFi agent. Talk like a human - casual, helpful, no jargon. Analyze this arbitrage: ${topOpportunity.tokenSymbol} is ${topOpportunity.priceDifference.toFixed(2)}% cheaper on ${topOpportunity.fromChainName} ($${topOpportunity.fromPrice.toFixed(4)}) than ${topOpportunity.toChainName} ($${topOpportunity.toPrice.toFixed(4)}). Profit after fees: ~$${topOpportunity.profitAfterFees.toFixed(2)}. Give a short, conversational take - 1-2 sentences.`
+            prompt: `You're ${agent.name}, a friendly DeFi agent. Talk like a human - casual, helpful, no jargon. Analyze this arbitrage: ${topOpportunity.tokenSymbol} is ${topOpportunity.priceDifference.toFixed(2)}% cheaper on ${topOpportunity.fromChainName} ($${topOpportunity.fromPrice.toFixed(4)}) than ${topOpportunity.toChainName} ($${topOpportunity.toPrice.toFixed(4)}). Profit after fees: ~$${topOpportunity.profitAfterFees.toFixed(2)}. Give a short, conversational take - 1-2 sentences.`
           });
 
           result = {
@@ -422,7 +420,7 @@ const App: React.FC = () => {
         } else {
           // No opportunities found
           const analysis = await geminiService.chat({
-            prompt: `You're Arbitrage Hunter. Talk like a human - casual, friendly. No profitable arbitrage found after scanning Ethereum, Arbitrum, Optimism, Polygon, and Base. Give a short, conversational reply - 1-2 sentences.`
+            prompt: `You're ${agent.name}. Talk like a human - casual, friendly. No profitable arbitrage found after scanning Ethereum, Arbitrum, Optimism, Polygon, and Base. Give a short, conversational reply - 1-2 sentences.`
           });
           result = {
             type: 'arbitrage_detection',
@@ -496,7 +494,7 @@ const App: React.FC = () => {
             : 'No USDC found across supported chains.';
 
           const analysis = await geminiService.chat({
-            prompt: `You're Portfolio Guardian. Talk like a human - friendly, clear, no jargon. User's wallet ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}: $${portfolio.totalValueUSD.toFixed(2)} total, ${portfolio.tokenCount} positions across ${portfolio.chains.join(', ')}. ${usdcDetails} By token: ${Object.entries(positionsByToken).map(([token, value]) => `${token}: $${typeof value === 'number' ? value.toFixed(2) : value}`).join(', ')}. ${portfolio.pnl24h !== undefined ? `24h change: ${portfolio.pnl24h >= 0 ? '+' : ''}$${portfolio.pnl24h.toFixed(2)} (${portfolio.pnlPercent !== undefined ? (portfolio.pnlPercent >= 0 ? '+' : '') + portfolio.pnlPercent.toFixed(2) + '%' : 'N/A'})` : ''}. Give a short, conversational summary - 1-2 sentences.`
+            prompt: `You're ${agent.name}. Talk like a human - friendly, clear, no jargon. User's wallet ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}: $${portfolio.totalValueUSD.toFixed(2)} total, ${portfolio.tokenCount} positions across ${portfolio.chains.join(', ')}. ${usdcDetails} By token: ${Object.entries(positionsByToken).map(([token, value]) => `${token}: $${typeof value === 'number' ? value.toFixed(2) : value}`).join(', ')}. ${portfolio.pnl24h !== undefined ? `24h change: ${portfolio.pnl24h >= 0 ? '+' : ''}$${portfolio.pnl24h.toFixed(2)} (${portfolio.pnlPercent !== undefined ? (portfolio.pnlPercent >= 0 ? '+' : '') + portfolio.pnlPercent.toFixed(2) + '%' : 'N/A'})` : ''}. Give a short, conversational summary - 1-2 sentences.`
           });
 
           result = {
@@ -522,7 +520,7 @@ const App: React.FC = () => {
 
           // Fallback to analysis only
           const analysis = await geminiService.chat({
-            prompt: `You're Portfolio Guardian. Talk like a human - friendly, helpful. Couldn't fetch the portfolio for ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)} (${error.message}). Give a short, conversational suggestion - 1 sentence.`
+            prompt: `You're ${agent.name}. Talk like a human - friendly, helpful. Couldn't fetch the portfolio for ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)} (${error.message}). Give a short, conversational suggestion - 1 sentence.`
           });
 
           result = {
@@ -554,7 +552,7 @@ const App: React.FC = () => {
           });
 
           const analysis = await geminiService.chat({
-            prompt: `You're Rebalancer. Talk like a human - friendly, clear. Portfolio: $${driftAnalysis.totalValueUSD.toFixed(2)}, drift: ${driftAnalysis.totalDrift.toFixed(1)}%. ${driftAnalysis.recommendations.join('. ')}. Needs rebalancing: ${driftAnalysis.needsRebalancing}. Give a short, conversational recommendation - 1-2 sentences.`
+            prompt: `You're ${agent.name}. Talk like a human - friendly, clear. Portfolio: $${driftAnalysis.totalValueUSD.toFixed(2)}, drift: ${driftAnalysis.totalDrift.toFixed(1)}%. ${driftAnalysis.recommendations.join('. ')}. Needs rebalancing: ${driftAnalysis.needsRebalancing}. Give a short, conversational recommendation - 1-2 sentences.`
           });
 
           result = {
@@ -574,7 +572,7 @@ const App: React.FC = () => {
         } catch (error: any) {
           console.error('Rebalancing analysis error:', error);
           const analysis = await geminiService.chat({
-            prompt: `You're Rebalancer. Talk like a human. Allocation check failed: ${error.message}. One short, friendly sentence.`
+            prompt: `You're ${agent.name}. Talk like a human. Allocation check failed: ${error.message}. One short, friendly sentence.`
           });
           result = {
             type: 'rebalancing',
@@ -612,7 +610,7 @@ const App: React.FC = () => {
           if (topOpportunities.length > 0) {
             const best = yieldData.bestOpportunity;
             const analysis = await geminiService.chat({
-              prompt: `You're Yield Seeker. Talk like a human - enthusiastic but clear. Found ${topOpportunities.length} opportunities. Best: ${best?.protocol} on ${best?.chainName} at ${best?.apy.toFixed(2)}% APY (${best?.risk} risk). Average: ${yieldData.averageApy.toFixed(2)}%. Give a short, conversational recommendation - 1-2 sentences.`
+              prompt: `You're ${agent.name}. Talk like a human - enthusiastic but clear. Found ${topOpportunities.length} opportunities. Best: ${best?.protocol} on ${best?.chainName} at ${best?.apy.toFixed(2)}% APY (${best?.risk} risk). Average: ${yieldData.averageApy.toFixed(2)}%. Give a short, conversational recommendation - 1-2 sentences.`
             });
 
             result = {
@@ -631,7 +629,7 @@ const App: React.FC = () => {
             summary = `Found ${topOpportunities.length} real yield opportunities. Best: ${best?.apy.toFixed(2)}% APY on ${best?.protocol} (${best?.chainName})`;
           } else {
             const analysis = await geminiService.chat({
-              prompt: `You're Yield Seeker. Talk like a human. No great USDC yield opportunities right now across the chains we checked. One short, friendly sentence.`
+              prompt: `You're ${agent.name}. Talk like a human. No great USDC yield opportunities right now across the chains we checked. One short, friendly sentence.`
             });
             result = {
               type: 'yield_optimization',
@@ -646,7 +644,7 @@ const App: React.FC = () => {
         } catch (error: any) {
           console.error('Yield fetching error:', error);
           const analysis = await geminiService.chat({
-            prompt: `You're Yield Seeker. Talk like a human. Yield scan failed: ${error.message}. One short, helpful sentence.`
+            prompt: `You're ${agent.name}. Talk like a human. Yield scan failed: ${error.message}. One short, helpful sentence.`
           });
           result = {
             type: 'yield_optimization',
@@ -689,7 +687,7 @@ const App: React.FC = () => {
           addLog(agent.name, `⛽ Gas estimate: $${riskAnalysis.gasCostUSD.toFixed(2)}`);
 
           const analysis = await geminiService.chat({
-            prompt: `You're Risk Sentinel. Talk like a human - clear, reassuring. Route check: Risk ${riskAnalysis.riskScore}/100, ${riskAnalysis.status}. Slippage: ${riskAnalysis.slippage.toFixed(2)}%, Gas: ~$${riskAnalysis.gasCostUSD.toFixed(2)}. ${riskAnalysis.issues.length > 0 ? `Heads up: ${riskAnalysis.issues[0]}` : 'Looks good.'}. Give a short, conversational safety take - 1-2 sentences.`
+            prompt: `You're ${agent.name}. Talk like a human - clear, reassuring. Route check: Risk ${riskAnalysis.riskScore}/100, ${riskAnalysis.status}. Slippage: ${riskAnalysis.slippage.toFixed(2)}%, Gas: ~$${riskAnalysis.gasCostUSD.toFixed(2)}. ${riskAnalysis.issues.length > 0 ? `Heads up: ${riskAnalysis.issues[0]}` : 'Looks good.'}. Give a short, conversational safety take - 1-2 sentences.`
           });
 
           result = {
@@ -712,7 +710,7 @@ const App: React.FC = () => {
         } catch (error: any) {
           console.error('Risk analysis error:', error);
           const analysis = await geminiService.chat({
-            prompt: `You're Risk Sentinel. Talk like a human. Couldn't validate the route: ${error.message}. One short, friendly sentence.`
+            prompt: `You're ${agent.name}. Talk like a human. Couldn't validate the route: ${error.message}. One short, friendly sentence.`
           });
           result = {
             type: 'risk_analysis',
@@ -727,7 +725,7 @@ const App: React.FC = () => {
         }
       } else if (agent.role === 'Glitch') {
         // Route Executor - Real execution with AUTO-SIGN and detailed logging
-        addLog(agent.name, '⚡ Route Executor powering up...');
+        addLog(agent.name, '⚡ Stilgar powering up...');
         await new Promise(r => setTimeout(r, 200));
         addLog(agent.name, '🔗 Connecting to LI.FI aggregator...');
         await new Promise(r => setTimeout(r, 200));
@@ -875,9 +873,9 @@ const App: React.FC = () => {
               const successMessage = {
                 id: `msg_${Date.now()}_exec_success`,
                 type: 'agent' as const,
-                content: `Route Executor: ✅ Transaction complete! Bridged ${amountToUse.toFixed(2)} USDC from ${sourceBalance.chainName} → ${toChainName}. TX: ${txHash.slice(0, 10)}...`,
+                content: `${agent.name}: ✅ Transaction complete! Bridged ${amountToUse.toFixed(2)} USDC from ${sourceBalance.chainName} → ${toChainName}. TX: ${txHash.slice(0, 10)}...`,
                 timestamp: Date.now(),
-                agentName: 'Route Executor'
+                agentName: agent.name
               };
               agentChat.appendMessage(successMessage);
 
@@ -971,7 +969,7 @@ const App: React.FC = () => {
       } else {
         // Route Strategist - Strategic coordination
         const analysis = await geminiService.chat({
-          prompt: `You're Route Strategist. Talk like a human - friendly, confident, like a helpful team lead. User asked: ${taskDescription || 'coordinate and analyze market conditions'}. Give a short, conversational response - 1-2 sentences.`
+          prompt: `You're ${agent.name}. Talk like a human - friendly, confident, like a helpful team lead. User asked: ${taskDescription || 'coordinate and analyze market conditions'}. Give a short, conversational response - 1-2 sentences.`
         });
         result = {
           type: 'strategy_coordination',
@@ -1032,7 +1030,7 @@ const App: React.FC = () => {
     }
 
     setIsExecuting(true);
-    addLog('Route Executor', '⚡ EXECUTING! Signing transaction with your wallet...');
+    addLog(AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar', '⚡ EXECUTING! Signing transaction with your wallet...');
 
     try {
       const { lifiService } = await import('./services/lifi');
@@ -1040,7 +1038,7 @@ const App: React.FC = () => {
       // Execute the route with wallet client
       const result = await lifiService.executeRoute(pendingExecution.quote, walletClient);
 
-      addLog('Route Executor', `✅ Transaction submitted! Hash: ${result.transactionHash || result.hash || 'pending'}`);
+      addLog(AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar', `✅ Transaction submitted! Hash: ${result.transactionHash || result.hash || 'pending'}`);
       toast.success('Transaction submitted! Check your wallet for confirmation.');
 
       // Clear pending execution
@@ -1049,13 +1047,13 @@ const App: React.FC = () => {
       // Add success message to chat
       agentChat.appendMessage({
         type: 'agent',
-        content: `Route Executor: ✅ Transaction executed successfully! ${pendingExecution.summary}. TX hash: ${(result.transactionHash || result.hash || 'pending').slice(0, 10)}...`,
-        agentName: 'Route Executor'
+        content: `${AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar'}: ✅ Transaction executed successfully! ${pendingExecution.summary}. TX hash: ${(result.transactionHash || result.hash || 'pending').slice(0, 10)}...`,
+        agentName: AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar'
       });
 
     } catch (error: any) {
       console.error('Execution error:', error);
-      addLog('Route Executor', `❌ Execution failed: ${error.message}`);
+      addLog(AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar', `❌ Execution failed: ${error.message}`);
       toast.error(`Execution failed: ${error.message}`);
     } finally {
       setIsExecuting(false);
@@ -1065,7 +1063,7 @@ const App: React.FC = () => {
   // Cancel pending execution
   const handleCancelExecution = useCallback(() => {
     setPendingExecution(null);
-    addLog('Route Executor', '🚫 Execution cancelled by user');
+    addLog(AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar', '🚫 Execution cancelled by user');
     toast.info('Execution cancelled');
   }, [addLog]);
 
@@ -1093,13 +1091,13 @@ const App: React.FC = () => {
   // Commander orchestration
   const handleCommanderAction = useCallback(async (customOrder?: string) => {
     if (operationMode !== 'auto') {
-      toast.info('Switch to AUTO mode for Route Strategist orchestration');
+      toast.info('Switch to AUTO mode for Paul Atreides orchestration');
       return;
     }
 
     const commander = AGENTS.find(a => a.id === 'a0');
     if (!commander || !activeAgents.includes('a0')) {
-      toast.error('Route Strategist must be active for orchestration');
+      toast.error('Paul Atreides must be active for orchestration');
       return;
     }
 
@@ -1139,82 +1137,18 @@ const App: React.FC = () => {
 
   // Main app UI
   const mainApp = (
-    <div className="h-screen min-h-screen bg-neural-dark text-gray-200 font-sans flex flex-col overflow-hidden relative selection:bg-neural-purple/30 selection:text-neural-purple">
-      <ParticleNetwork />
-
+    <div className="h-screen min-h-screen bg-arrakis-brown text-gray-200 font-sans flex flex-col overflow-hidden relative selection:bg-spice-orange/30 selection:text-spice-orange">
       {/* Top Bar */}
-      <UserBar onLogoClick={handleBackToLanding} onLogout={handleLogout} />
+      <UserBar
+        onLogoClick={handleBackToLanding}
+        onLogout={handleLogout}
+        onReset={handleWorkflowReset}
+        taskResultsCount={taskResults.length}
+        onShowDashboard={() => setShowOperationsDashboard(true)}
+      />
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden relative z-10 min-h-0">
-        {/* Left Sidebar */}
-        <div className="w-80 bg-black/20 backdrop-blur-md border-r border-white/10 flex flex-col overflow-hidden">
-          {/* Mode Control */}
-          <div className="p-4 border-b border-white/10">
-            <CaptainControlPanel
-              mode={operationMode}
-              onModeChange={setOperationMode}
-              onReset={handleWorkflowReset}
-            />
-          </div>
-
-          {/* Agent Cards */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {AGENTS.map((agent) => {
-              const isActive = activeAgents.includes(agent.id);
-              const status = agentStatuses[agent.id] || (isActive ? 'idle' : 'offline');
-              const progress = agentProgress[agent.id];
-
-              return (
-                <div key={agent.id} className="relative">
-                  <AgentCard
-                    agent={agent}
-                    isActive={isActive}
-                    status={status}
-                    onClick={() => setSelectedAgentId(agent.id)}
-                    onToggle={() => {
-                      if (isActive) {
-                        handleDeactivateAgent(agent.id);
-                      } else {
-                        handleActivateAgent(agent.id);
-                      }
-                    }}
-                    isAutoMode={operationMode === 'auto'}
-                    customOrder={agent.id === 'a0' ? commanderCustomOrder : undefined}
-                    onCustomOrderChange={agent.id === 'a0' ? setCommanderCustomOrder : undefined}
-                  />
-                  {progress?.isActive && (
-                    <AgentProgressBar
-                      agentName={agent.name}
-                      progress={progress.progress}
-                      task={progress.task}
-                    />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Operations Dashboard */}
-          {taskResults.length > 0 && (
-            <div className="p-4 border-t border-white/10">
-              <div className="bg-gradient-to-r from-neural-purple/10 via-blue-500/10 to-purple-500/10 border border-neural-purple/30 rounded-lg p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-mono text-neural-purple uppercase tracking-wider">Operations</span>
-                  <span className="text-neural-purple font-bold font-mono">{taskResults.length} tasks</span>
-                </div>
-                <button
-                  onClick={() => setShowOperationsDashboard(true)}
-                  className="w-full bg-neural-purple/10 hover:bg-neural-purple/20 border border-neural-purple/30 text-neural-purple font-semibold py-2.5 px-4 rounded transition-all flex items-center justify-center gap-2 text-sm font-mono"
-                >
-                  <Activity size={16} />
-                  VIEW DASHBOARD
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* Center: Flow Canvas & Console */}
         <div className="flex-1 flex flex-col overflow-hidden relative min-h-0">
           {/* Canvas */}
@@ -1255,65 +1189,75 @@ const App: React.FC = () => {
         <div className="w-96 flex flex-col border-l border-white/10 overflow-hidden bg-black/20 backdrop-blur-md">
           {/* Tab Buttons */}
           <div className="flex border-b border-white/10 bg-black/40">
-              <button
-                onClick={() => setRightPanelView('chat')}
-                className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'chat'
-                  ? 'bg-neural-purple/10 text-neural-purple border-b-2 border-neural-purple'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'
-                  }`}
-              >
-                INTENT CHAT
-              </button>
-              <button
-                onClick={() => setRightPanelView('yield')}
-                className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'yield'
-                  ? 'bg-neural-purple/10 text-neural-purple border-b-2 border-neural-purple'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'
-                  }`}
-              >
-                <Zap size={14} />
-                YIELD
-              </button>
-              <button
-                onClick={() => setRightPanelView('arbitrage')}
-                className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'arbitrage'
-                  ? 'bg-cyan-500/10 text-cyan-400 border-b-2 border-cyan-400'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'
-                  }`}
-              >
-                <ArrowRightLeft size={14} />
-                ARB
-              </button>
-              <button
-                onClick={() => setRightPanelView('alerts')}
-                className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'alerts'
-                  ? 'bg-orange-500/10 text-orange-400 border-b-2 border-orange-400'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'
-                  }`}
-              >
-                <Bell size={14} />
-                24/7
-              </button>
-              <button
-                onClick={() => setRightPanelView('history')}
-                className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'history'
-                  ? 'bg-yellow-500/10 text-yellow-400 border-b-2 border-yellow-400'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'
-                  }`}
-              >
-                <History size={14} />
-                TXS
-              </button>
-              <button
-                onClick={() => setRightPanelView('wallets')}
-                className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'wallets'
-                  ? 'bg-purple-500/10 text-purple-400 border-b-2 border-purple-400'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'
-                  }`}
-              >
-                <Wallet size={14} />
-                👛
-              </button>
+            <button
+              onClick={() => setRightPanelView('chat')}
+              className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'chat'
+                ? 'bg-spice-orange/10 text-spice-orange border-b-2 border-spice-orange'
+                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+            >
+              INTENT CHAT
+            </button>
+            <button
+              onClick={() => setRightPanelView('yield')}
+              className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'yield'
+                ? 'bg-spice-orange/10 text-spice-orange border-b-2 border-spice-orange'
+                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+            >
+              <Zap size={14} />
+              YIELD
+            </button>
+            <button
+              onClick={() => setRightPanelView('arbitrage')}
+              className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'arbitrage'
+                ? 'bg-cyan-500/10 text-cyan-400 border-b-2 border-cyan-400'
+                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+            >
+              <ArrowRightLeft size={14} />
+              ARB
+            </button>
+            <button
+              onClick={() => setRightPanelView('alerts')}
+              className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'alerts'
+                ? 'bg-orange-500/10 text-orange-400 border-b-2 border-orange-400'
+                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+            >
+              <Bell size={14} />
+              24/7
+            </button>
+            <button
+              onClick={() => setRightPanelView('history')}
+              className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'history'
+                ? 'bg-yellow-500/10 text-yellow-400 border-b-2 border-yellow-400'
+                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+            >
+              <History size={14} />
+              TXS
+            </button>
+            <button
+              onClick={() => setRightPanelView('wallets')}
+              className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'wallets'
+                ? 'bg-purple-500/10 text-purple-400 border-b-2 border-purple-400'
+                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+            >
+              <Wallet size={14} />
+              👛
+            </button>
+            <button
+              onClick={() => setRightPanelView('registry')}
+              className={`flex-1 px-4 py-3 text-sm font-mono transition-colors flex items-center justify-center gap-2 ${rightPanelView === 'registry'
+                ? 'bg-purple-500/10 text-purple-400 border-b-2 border-purple-400'
+                : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+            >
+              <Tag size={14} />
+              ENS
+            </button>
           </div>
 
           {/* Panel Content - Takes remaining space */}
@@ -1378,11 +1322,24 @@ const App: React.FC = () => {
                   }}
                 />
               </div>
-            ) : (
+            ) : rightPanelView === 'wallets' ? (
               <div className="h-full overflow-y-auto p-3">
                 <MultiWalletManager
                   onLog={(message, type) => {
                     addLog('WALLET', message);
+                    if (type === 'success') {
+                      toast.success(message, { position: 'bottom-right' });
+                    } else if (type === 'error') {
+                      toast.error(message, { position: 'bottom-right' });
+                    }
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="h-full overflow-y-auto p-3">
+                <AgentRegistry
+                  onLog={(message, type) => {
+                    addLog('REGISTRY', message);
                     if (type === 'success') {
                       toast.success(message, { position: 'bottom-right' });
                     } else if (type === 'error') {
@@ -1417,7 +1374,7 @@ const App: React.FC = () => {
           <div className="absolute bottom-6 right-6 z-40">
             <button
               onClick={() => setShowOperationsDashboard(true)}
-              className="group bg-gradient-to-r from-neural-purple to-blue-500 hover:from-neural-purple/90 hover:to-blue-500/90 text-black font-bold px-6 py-3 rounded-full shadow-2xl shadow-neural-purple/50 transition-all hover:scale-105 flex items-center gap-2 font-mono"
+              className="group bg-gradient-to-r from-spice-orange to-blue-500 hover:from-spice-orange/90 hover:to-blue-500/90 text-black font-bold px-6 py-3 rounded-full shadow-2xl shadow-spice-orange/50 transition-all hover:scale-105 flex items-center gap-2 font-mono"
               title="View Operations Dashboard"
             >
               <Activity size={20} className="animate-pulse" />
@@ -1445,14 +1402,14 @@ const App: React.FC = () => {
       {/* Execution Confirmation Modal */}
       {pendingExecution && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-gray-900 border border-neural-purple/30 rounded-2xl max-w-md w-full p-6 shadow-2xl shadow-neural-purple/20">
+          <div className="bg-gray-900 border border-spice-orange/30 rounded-2xl max-w-md w-full p-6 shadow-2xl shadow-spice-orange/20">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 bg-neural-purple/20 rounded-full flex items-center justify-center">
-                <Zap className="w-6 h-6 text-neural-purple" />
+              <div className="w-12 h-12 bg-spice-orange/20 rounded-full flex items-center justify-center">
+                <Zap className="w-6 h-6 text-spice-orange" />
               </div>
               <div>
                 <h3 className="text-xl font-bold text-white font-mono">Confirm Execution</h3>
-                <p className="text-gray-400 text-sm">Route Executor is ready</p>
+                <p className="text-gray-400 text-sm">Stilgar is ready</p>
               </div>
             </div>
 
@@ -1463,7 +1420,7 @@ const App: React.FC = () => {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-400 text-sm">Expected Output</span>
-                <span className="text-neural-purple font-mono text-sm">{pendingExecution.estimatedOutput}</span>
+                <span className="text-spice-orange font-mono text-sm">{pendingExecution.estimatedOutput}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-400 text-sm">Gas Cost</span>
@@ -1488,7 +1445,7 @@ const App: React.FC = () => {
               <button
                 onClick={handleConfirmExecution}
                 disabled={isExecuting}
-                className="flex-1 px-4 py-3 bg-neural-purple hover:bg-neural-purple/80 disabled:bg-gray-600 text-black font-bold font-mono rounded-lg transition-colors flex items-center justify-center gap-2"
+                className="flex-1 px-4 py-3 bg-spice-orange hover:bg-spice-orange/80 disabled:bg-gray-600 text-black font-bold font-mono rounded-lg transition-colors flex items-center justify-center gap-2"
               >
                 {isExecuting ? (
                   <>

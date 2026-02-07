@@ -219,14 +219,10 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
         setTxHash(result.result?.txHash || null);
         setViewMode('success');
         onLog?.('✅ Yield rotation executed successfully!', 'success');
-        
+
         // Refresh balance after successful swap
         setTimeout(() => {
           window.dispatchEvent(new Event('refresh-balance'));
-          // Also refresh positions by triggering a new scan
-          if (address) {
-            handleScan();
-          }
         }, 2000); // Wait 2 seconds for transaction to be mined
       } else {
         setError(result.error || 'Execution failed');

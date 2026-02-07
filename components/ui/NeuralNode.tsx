@@ -23,8 +23,8 @@ const NeuralNode: React.FC<NeuralNodeProps> = ({
     onCustomOrderChange,
 }) => {
     const statusColors = {
-        idle: 'border-neural-purple/50',
-        working: 'border-neural-cyan/80 shadow-neural-cyan/50',
+        idle: 'border-deep-sand/50',
+        working: 'border-spice-orange/80 shadow-spice-orange/50',
         success: 'border-green-500/80',
         error: 'border-red-500/80',
         offline: 'border-gray-600/30',
@@ -36,22 +36,22 @@ const NeuralNode: React.FC<NeuralNodeProps> = ({
         <div
             className={`relative group transition-all duration-300 ${isActive ? 'scale-100' : 'scale-95 opacity-70'}`}
         >
-            {/* Hexagonal card */}
+            {/* Desert-themed card */}
             <div
                 onClick={onClick}
-                className={`relative overflow-hidden rounded-lg border-2 ${statusColor} bg-gradient-to-br from-neural-dark/90 to-neural-darker/90 backdrop-blur-md p-4 cursor-pointer transition-all duration-300 hover:shadow-lg ${isActive ? 'shadow-lg' : ''}`}
+                className={`relative overflow-hidden rounded-lg border-2 ${statusColor} bg-gradient-to-br from-arrakis-brown/90 to-stillsuit-black/90 backdrop-blur-md p-4 cursor-pointer transition-all duration-300 hover:shadow-lg ${isActive ? 'shadow-lg' : ''}`}
                 style={{
-                    boxShadow: isActive ? `0 0 20px rgba(99, 102, 241, 0.3)` : 'none',
+                    boxShadow: isActive ? `0 0 20px rgba(216, 67, 21, 0.3)` : 'none',
                 }}
             >
-                {/* Pulsing border animation for active agents */}
+                {/* Pulsing border animation for active agents - spice glow */}
                 {isActive && status === 'working' && (
-                    <div className="absolute inset-0 rounded-lg border-2 border-neural-cyan animate-pulse-slow pointer-events-none" />
+                    <div className="absolute inset-0 rounded-lg border-2 border-spice-orange animate-pulse-slow pointer-events-none" />
                 )}
 
                 {/* Avatar */}
                 <div className="flex items-center gap-3 mb-3">
-                    <div className="w-12 h-12 rounded-full overflow-hidden bg-neural-purple/20 flex items-center justify-center">
+                    <div className="w-12 h-12 rounded-full overflow-hidden bg-spice-orange/20 flex items-center justify-center">
                         <img
                             src={agent.avatar}
                             alt={agent.name}
@@ -70,11 +70,11 @@ const NeuralNode: React.FC<NeuralNodeProps> = ({
                     <div className="flex items-center gap-1">
                         <div className="h-1 w-16 bg-gray-700 rounded-full overflow-hidden">
                             <div
-                                className="h-full bg-gradient-to-r from-neural-purple to-neural-cyan"
+                                className="h-full bg-gradient-to-r from-spice-orange to-desert-sand"
                                 style={{ width: `${agent.trustScore}%` }}
                             />
                         </div>
-                        <span className="text-xs text-neural-cyan font-mono">{agent.trustScore}%</span>
+                        <span className="text-xs text-spice-orange font-mono">{agent.trustScore}%</span>
                     </div>
                 </div>
 
@@ -87,7 +87,7 @@ const NeuralNode: React.FC<NeuralNodeProps> = ({
                             onToggle();
                         }}
                         className={`px-3 py-1 rounded-full font-mono text-xs transition-all ${isActive
-                            ? 'bg-neural-purple/20 text-neural-purple border border-neural-purple/50'
+                            ? 'bg-spice-orange/20 text-spice-orange border border-spice-orange/50'
                             : 'bg-gray-700/50 text-gray-400 border border-gray-600/50'
                             }`}
                     >
@@ -103,7 +103,7 @@ const NeuralNode: React.FC<NeuralNodeProps> = ({
                             value={customOrder || ''}
                             onChange={(e) => onCustomOrderChange(e.target.value)}
                             placeholder="Custom order..."
-                            className="w-full bg-black/30 border border-neural-purple/30 rounded px-2 py-1 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-neural-purple"
+                            className="w-full bg-black/30 border border-spice-orange/30 rounded px-2 py-1 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-spice-orange"
                             onClick={(e) => e.stopPropagation()}
                         />
                     </div>

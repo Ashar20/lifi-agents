@@ -255,37 +255,37 @@ export const geminiService = {
     if (!ai || !GEMINI_API_KEY) {
       // Fallback dialogues
       const ruleBased: Record<string, string[]> = {
-        'Route Strategist': [
+        'Paul Atreides': [
           'All units report status. Cross-chain network operational.',
           'Analyzing market conditions across all chains.',
           'Coordinating team response. Stay vigilant.',
         ],
-        'Arbitrage Hunter': [
+        'Chani': [
           'Scanning for price differences... Systems online.',
           'Opportunity radar active. Monitoring DEX prices.',
           'Price analysis in progress. No major opportunities detected.',
         ],
-        'Portfolio Guardian': [
+        'Irulan': [
           'Cross-referencing positions... Match probability: calculating.',
           'Position analysis complete. PnL updated.',
           'Portfolio vault updated with new positions.',
         ],
-        'Yield Seeker': [
+        'Liet-Kynes': [
           'Yield scanning active. How can I optimize your returns today?',
           'Standing by to find best yields. Your returns are my priority.',
           'Monitoring for yield opportunities across chains.',
         ],
-        'Risk Sentinel': [
+        'Duncan Idaho': [
           'Route validation ready. Lets analyze route safety together.',
           'Creating new risk analysis for current routes.',
           'Interactive validation drills available. Stay safe!',
         ],
-        'Rebalancer': [
+        'Thufir Hawat': [
           'Allocation monitoring active.',
           'Rebalancing systems running smoothly.',
           'Target allocation protocols engaged. Your portfolio is balanced.',
         ],
-        'Route Executor': [
+        'Stilgar': [
           'Execution system armed. Ready for rapid deployment.',
           'LI.FI route execution systems tested and ready.',
           'Cross-chain execution network: OPERATIONAL',
@@ -305,13 +305,13 @@ export const geminiService = {
     }
 
     const roleContext: Record<string, string> = {
-      'Route Strategist': 'strategic commander coordinating cross-chain DeFi operations',
-      'Arbitrage Hunter': 'vigilant scanner detecting arbitrage opportunities',
-      'Portfolio Guardian': 'knowledge keeper of cross-chain positions',
-      'Yield Seeker': 'optimistic optimizer finding best yields',
-      'Risk Sentinel': 'cautious analyst validating route safety',
-      'Rebalancer': 'systematic agent maintaining portfolio allocations',
-      'Route Executor': 'rapid executor of LI.FI routes',
+      'Paul Atreides': 'strategic commander coordinating cross-chain DeFi operations',
+      'Chani': 'vigilant scanner detecting arbitrage opportunities',
+      'Irulan': 'knowledge keeper of cross-chain positions',
+      'Liet-Kynes': 'optimistic optimizer finding best yields',
+      'Duncan Idaho': 'cautious analyst validating route safety',
+      'Thufir Hawat': 'systematic agent maintaining portfolio allocations',
+      'Stilgar': 'rapid executor of LI.FI routes',
     };
 
     const prompt = `You are ${agentName}, a ${roleContext[agentName] || agentRole} AI agent in a cross-chain DeFi orchestrator.

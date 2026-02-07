@@ -10,8 +10,9 @@ import { transactionHistory, getExplorerUrl } from './transactionHistory';
 import { lifiService } from './lifi';
 
 // Initialize LI.FI SDK (for executeRoute - lifiService uses Arc for getQuote)
+// Note: integrator name must be max 23 characters
 const lifi = new LiFi({
-  integrator: 'lifi-agents-orchestrator',
+  integrator: 'lifi-agents-orch',
 });
 
 // Supported chains configuration with fallback RPCs
@@ -311,7 +312,117 @@ export async function getWalletPositions(
   return positions;
 }
 
-// Fetch real yield opportunities from DeFiLlama
+// Trusted protocols with established track records
+const TRUSTED_PROTOCOLS = new Set([
+  'aave-v3', 'aave-v2', 'compound-v3', 'compound-v2', 'compound',
+  'maker', 'makerdao', 'sky',
+  'lido', 'rocket-pool', 'frax-ether',
+  'curve-dex', 'curve', 'convex-finance',
+  'uniswap-v3', 'uniswap-v2',
+  'yearn-finance', 'yearn',
+  'morpho', 'morpho-blue', 'morpho-aave',
+  'spark', 'spark-lend',
+  'fluid', 'instadapp',
+  'pendle', 'eigenlayer',
+  'gearbox', 'euler',
+]);
+
+// Protocols known for volatile/incentivized yields - require extra scrutiny
+const HIGH_VOLATILITY_PROTOCOLS = new Set([
+  'aerodrome', 'velodrome', 'camelot', 'ramses', 'thena',
+  'pancakeswap', 'sushiswap', 'trader-joe',
+]);
+
+// Calculate risk-adjusted score for yield opportunities
+function calculateYieldScore(pool: any): { score: number; risk: 'low' | 'medium' | 'high'; flags: string[] } {
+  const flags: string[] = [];
+  let riskMultiplier = 1.0;
+
+  const apy = pool.apy || 0;
+  const tvl = pool.tvlUsd || 0;
+  const protocol = (pool.project || '').toLowerCase();
+  const apyBase = pool.apyBase || 0;
+  const apyReward = pool.apyReward || 0;
+  const ilRisk = pool.ilRisk === 'yes';
+  const stablecoin = pool.stablecoin === true;
+
+  // Flag: Unrealistic APY (>100% is almost always unsustainable)
+  if (apy > 100) {
+    flags.push('unrealistic_apy');
+    riskMultiplier *= 0.1; // Heavy penalty
+  } else if (apy > 50) {
+    flags.push('high_apy');
+    riskMultiplier *= 0.5;
+  }
+
+  // Flag: Mostly reward-based APY (unsustainable, depends on token emissions)
+  if (apyReward > 0 && apyBase > 0) {
+    const rewardRatio = apyReward / (apyBase + apyReward);
+    if (rewardRatio > 0.8) {
+      flags.push('emission_dependent');
+      riskMultiplier *= 0.6;
+    } else if (rewardRatio > 0.5) {
+      flags.push('partially_emission');
+      riskMultiplier *= 0.85;
+    }
+  }
+
+  // Flag: Low TVL relative to APY (potential manipulation or low liquidity)
+  if (tvl < 1000000 && apy > 20) {
+    flags.push('low_tvl_high_apy');
+    riskMultiplier *= 0.7;
+  }
+
+  // Flag: Impermanent loss risk
+  if (ilRisk) {
+    flags.push('il_risk');
+    riskMultiplier *= 0.9;
+  }
+
+  // Bonus: Trusted protocol
+  if (TRUSTED_PROTOCOLS.has(protocol)) {
+    riskMultiplier *= 1.3;
+  }
+
+  // Penalty: High volatility protocol without high TVL backing
+  if (HIGH_VOLATILITY_PROTOCOLS.has(protocol.split('-')[0])) {
+    if (tvl < 5000000) {
+      flags.push('volatile_protocol');
+      riskMultiplier *= 0.7;
+    }
+  }
+
+  // Bonus: Stablecoin pool (lower risk)
+  if (stablecoin) {
+    riskMultiplier *= 1.1;
+  }
+
+  // Bonus: High TVL (more battle-tested)
+  if (tvl > 50000000) {
+    riskMultiplier *= 1.2;
+  } else if (tvl > 10000000) {
+    riskMultiplier *= 1.1;
+  }
+
+  // Calculate final score: APY adjusted by risk
+  // Use log scale for APY to prevent extreme values from dominating
+  const normalizedApy = Math.min(apy, 50); // Cap at 50% for scoring
+  const score = normalizedApy * riskMultiplier * Math.log10(tvl / 100000 + 1);
+
+  // Determine risk level
+  let risk: 'low' | 'medium' | 'high' = 'medium';
+  if (flags.includes('unrealistic_apy') || flags.includes('low_tvl_high_apy')) {
+    risk = 'high';
+  } else if (TRUSTED_PROTOCOLS.has(protocol) && apy < 20 && tvl > 10000000) {
+    risk = 'low';
+  } else if (apy > 30 || flags.length >= 2) {
+    risk = 'high';
+  }
+
+  return { score, risk, flags };
+}
+
+// Fetch real yield opportunities from DeFiLlama with intelligent filtering
 export async function fetchYieldOpportunities(
   tokenFilter?: string
 ): Promise<YieldOpportunity[]> {
@@ -320,10 +431,10 @@ export async function fetchYieldOpportunities(
     if (!response.ok) {
       throw new Error(`DeFiLlama API error: ${response.status}`);
     }
-    
+
     const data = await response.json();
     const pools = data.data || [];
-    
+
     const chainNameToId: Record<string, number> = {
       'Ethereum': 1,
       'Arbitrum': 42161,
@@ -331,34 +442,57 @@ export async function fetchYieldOpportunities(
       'Polygon': 137,
       'Base': 8453,
     };
-    
+
     const supportedChainNames = Object.keys(chainNameToId);
-    const supportedTokens = tokenFilter 
+    const supportedTokens = tokenFilter
       ? [tokenFilter.toUpperCase()]
       : ['USDC', 'USDT', 'DAI', 'WETH'];
-    
-    return pools
-      .filter((pool: any) => {
-        const chain = pool.chain || '';
-        const symbol = (pool.symbol || '').toUpperCase();
-        return (
-          supportedChainNames.includes(chain) &&
-          supportedTokens.some(t => symbol.includes(t)) &&
-          pool.apy > 0.5 &&
-          pool.tvlUsd > 500000
-        );
-      })
-      .map((pool: any) => ({
+
+    // First pass: filter by basic criteria
+    const filtered = pools.filter((pool: any) => {
+      const chain = pool.chain || '';
+      const symbol = (pool.symbol || '').toUpperCase();
+      const apy = pool.apy || 0;
+      const tvl = pool.tvlUsd || 0;
+
+      // Basic filters
+      if (!supportedChainNames.includes(chain)) return false;
+      if (!supportedTokens.some(t => symbol.includes(t))) return false;
+      if (apy < 0.5 || apy > 500) return false; // Filter out < 0.5% and absurd yields
+      if (tvl < 500000) return false; // Min $500k TVL
+
+      return true;
+    });
+
+    // Second pass: score and rank
+    const scored = filtered.map((pool: any) => {
+      const { score, risk, flags } = calculateYieldScore(pool);
+      return {
         chainId: chainNameToId[pool.chain] || 1,
         chainName: pool.chain,
         protocol: pool.project,
         token: pool.symbol,
         apy: pool.apy,
+        apyBase: pool.apyBase || 0,
+        apyReward: pool.apyReward || 0,
         tvl: pool.tvlUsd,
-        risk: pool.apy > 30 ? 'high' : pool.apy > 10 ? 'medium' : 'low',
-      }))
-      .sort((a: YieldOpportunity, b: YieldOpportunity) => b.apy - a.apy)
-      .slice(0, 20);
+        risk,
+        score,
+        flags,
+      };
+    });
+
+    // Sort by risk-adjusted score (not raw APY)
+    scored.sort((a, b) => b.score - a.score);
+
+    // Log top opportunities for debugging
+    console.log('[Yield] 🎯 Top opportunities by risk-adjusted score:');
+    scored.slice(0, 5).forEach((opp, i) => {
+      console.log(`[Yield]   ${i + 1}. ${opp.protocol} on ${opp.chainName}: ${opp.apy.toFixed(2)}% APY (base: ${opp.apyBase.toFixed(2)}%, reward: ${opp.apyReward.toFixed(2)}%) - Risk: ${opp.risk}, Score: ${opp.score.toFixed(2)}${opp.flags.length ? ` [${opp.flags.join(', ')}]` : ''}`);
+    });
+
+    // Return top 20 by score
+    return scored.slice(0, 20).map(({ score, flags, apyBase, apyReward, ...opp }) => opp);
   } catch (error) {
     console.error('Error fetching yields:', error);
     return [];

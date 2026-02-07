@@ -1,195 +1,262 @@
 # 🌐 LI.FI Agents Orchestrator
 
-> **AI-Powered Multi-Agent Cross-Chain DeFi Orchestrator**  
-> Built for HackMoney 2026 - LI.FI Track
+> **AI-Powered Cross-Chain DeFi. Speak naturally. Get it done.**  
+> Built for HackMoney 2026 — LI.FI Track
 
-A professional cross-chain DeFi orchestrator featuring 7 specialized AI agents working in coordination to optimize cross-chain operations, detect arbitrage opportunities, manage portfolios, and execute routes via LI.FI. Built with React, TypeScript, and powered by Google Gemini AI.
+A cross-chain DeFi orchestrator with **7 specialized AI agents** (inspired by Dune characters) that work together to swap, bridge, optimize yields, detect arbitrage, and manage your portfolio across **Ethereum, Arbitrum, Optimism, Polygon, Base, and Avalanche**. Just type what you want—no forms, no jargon.
 
-## 🎯 Track: AI x LI.FI Smart App
+---
 
-This project competes in the **"Best AI x LI.FI Smart App"** category, implementing:
-- ✅ **Multi-Agent Orchestration**: 7 specialized agents working together
-- ✅ **LI.FI Integration**: All cross-chain actions via LI.FI SDK/API
-- ✅ **AI-Powered Decisions**: Gemini AI analyzes and decides when to act
-- ✅ **Strategy Loop**: Clear monitor → decide → act pattern
-- ✅ **Multi-Chain Support**: Ethereum, Arbitrum, Polygon, Optimism, and more
+## ✨ What It Does
 
-## 🤖 7 Specialized AI Agents
+| You Say | The System Does |
+|---------|-----------------|
+| *"Check my wallet"* | Fetches your USDC balance across all 6 chains |
+| *"Swap 100 USDC from Ethereum to Arbitrum"* | Finds the best route (Arc/CCTP for USDC→USDC), gets a quote |
+| *"Move my 50 USDC to Base"* | Bridges via Circle CCTP (native burn/mint) |
+| *"Put my USDC where it earns the most"* | Scans DeFiLlama for best APY across Aave, Compound, Morpho, etc. |
+| *"Swap my USDC to ETH"* | Uses LI.FI to find best route for token swaps |
+| *"Find arbitrage opportunities"* | Compares prices across chains and surfaces profitable gaps |
+| *"Make best use of 1 USDC from my wallet"* | Checks balance, yields, and suggests optimal action |
 
-### 1. **Route Strategist** (Commander)
-Strategic mastermind coordinating all cross-chain operations and making critical routing decisions.
+---
 
-### 2. **Arbitrage Hunter** (Navigator)
-Sharp-eyed scanner detecting price differences across chains for profitable arbitrage opportunities.
+## 🎯 Perfect Use Cases
 
-### 3. **Portfolio Guardian** (Archivist)
-Knowledge vault tracking all cross-chain positions, PnL, and historical performance.
+- **Busy DeFi users** — Type a goal, get a quote or action. No clicking through 5 screens.
+- **Multi-chain portfolios** — One interface for balances, swaps, and yields across 6 chains.
+- **Yield hunters** — Compare APY across protocols (Aave, Compound, Morpho, Yearn…) and chains.
+- **Arbitrage scouts** — Spot price differences across chains before executing.
+- **Portfolio rebalancers** — Monitor drift and rebalance via LI.FI routes.
+- **Bridge users** — USDC→USDC uses Arc (Circle CCTP); other pairs use LI.FI best route.
 
-### 4. **Yield Seeker** (Merchant)
-Optimistic AI companion finding the best yield opportunities across all chains.
+---
 
-### 5. **Risk Sentinel** (Sentinel)
-Cautious analyst validating route safety, slippage tolerance, and bridge security.
+## 🤖 The 7 Agents (Dune-Inspired)
 
-### 6. **Rebalancer** (Oracle)
-Systematic agent maintaining target portfolio allocations across all chains.
+| Agent | Role | What They Do |
+|-------|------|--------------|
+| **Paul Atreides** | Commander | Coordinates all agents, approves routes, strategic decisions |
+| **Chani** | Navigator | Detects arbitrage opportunities across chains |
+| **Irulan** | Archivist | Tracks positions, PnL, and historical performance |
+| **Liet-Kynes** | Merchant | Finds best yield opportunities (APY) across protocols |
+| **Duncan Idaho** | Sentinel | Validates route safety, slippage, and bridge security |
+| **Thufir Hawat** | Oracle | Monitors allocations, detects drift, rebalances |
+| **Stilgar** | Glitch | Executes LI.FI routes with minimal latency |
 
-### 7. **Route Executor** (Glitch)
-Ultra-fast execution engine running LI.FI routes with minimal latency.
+---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- **Node.js 18+** and **npm** or **yarn**
-- **Google Gemini API Key** ([Get it here](https://makersuite.google.com/app/apikey))
-- **Wallet Connect Project ID** (optional, for wallet integration)
+- **Node.js 18+**
+- **Google Gemini API Key** — [Get one](https://makersuite.google.com/app/apikey)
+- **WalletConnect Project ID** (optional, for wallet integration)
 
 ### Installation
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd lifi-agents-orchestrator
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Configure environment variables**
-   
-   Create a `.env` file in the project root:
-   ```env
-   VITE_GEMINI_API_KEY=your_gemini_api_key_here
-   VITE_WALLET_CONNECT_PROJECT_ID=your_wallet_connect_id (optional)
-   ```
-
-4. **Start development server**
-   ```bash
-   npm run dev
-   ```
-
-5. **Open your browser**
-   
-   Navigate to `http://localhost:3000`
-
-## 🏗️ Project Structure
-
-```
-lifi-agents-orchestrator/
-├── components/              # React UI components
-│   ├── AgentCard.tsx       # Agent display cards
-│   ├── AgentDetailPanel.tsx # Agent task execution interface
-│   └── ...
-├── services/               # Service layer
-│   ├── api.ts             # Gemini AI integration
-│   ├── lifi.ts            # LI.FI SDK integration
-│   └── strategyLoop.ts    # Monitor → Decide → Act pattern
-├── constants.ts           # Agent definitions and configurations
-├── types.ts              # TypeScript type definitions
-├── App.tsx               # Main application logic
-├── index.tsx             # Application entry point
-└── package.json          # Project dependencies
+```bash
+git clone <repository-url>
+cd lifi-agents-orchestrator
+npm install
 ```
 
-## 🔧 Technology Stack
+### Configure
 
-### Frontend
-- **React 19.2** - Modern UI with concurrent rendering
-- **TypeScript 5.8** - Type-safe development
-- **Vite 6.2** - Lightning-fast build tool
+Create `.env` in the project root:
 
-### DeFi & Cross-Chain
-- **LI.FI SDK** - Cross-chain routing and execution
-- **Ethers.js** - Ethereum interaction
-- **Wagmi** - React hooks for Ethereum
-- **Viem** - TypeScript Ethereum library
-
-### AI
-- **Google Gemini AI** - Strategy analysis and decision-making
-  - Cost: $0.002 per analysis
-  - Rate limiting: Smart throttling to prevent quota exhaustion
-
-## 📊 Strategy Loop Implementation
-
-Each agent follows the **Monitor → Decide → Act** pattern:
-
-1. **MONITOR**: Agent gathers current state (prices, positions, yields, etc.)
-2. **DECIDE**: Gemini AI analyzes state and decides if action is needed
-3. **ACT**: If approved, execute cross-chain route via LI.FI SDK
-
-### Example: Arbitrage Hunter Workflow
-
-```
-1. Monitor: Check USDC price on Ethereum vs Arbitrum
-2. Detect: 0.5% price difference after fees
-3. Decide: AI confirms profitable opportunity
-4. Act: Execute LI.FI route: ETH USDC → ARB USDC
-5. Report: Track execution and profit
+```env
+VITE_GEMINI_API_KEY=your_gemini_api_key_here
+VITE_WALLET_CONNECT_PROJECT_ID=your_wallet_connect_id  # optional
 ```
 
-## 🎮 Usage
-
-### Basic Operations
-
-1. **Activate Agents** - Select agents from the main interface to activate them
-2. **Execute Tasks** - Click on an agent to assign cross-chain tasks
-3. **View Results** - Monitor task execution and AI analysis in the console
-4. **Auto Mode** - Route Strategist orchestrates coordinated multi-agent operations
-
-### Agent Capabilities
-
-- **Arbitrage Detection**: Automatically finds and executes profitable arbitrage
-- **Yield Optimization**: Scans for best yield opportunities across chains
-- **Portfolio Rebalancing**: Maintains target allocations automatically
-- **Risk Analysis**: Validates route safety before execution
-- **Position Tracking**: Monitors all cross-chain positions in real-time
-
-## 🔐 Security & Privacy
-
-- **API Key Security** - Environment variables, never committed to repo
-- **Client-side Processing** - All AI analysis happens in browser
-- **LocalStorage** - User data stored locally, no external transmission
-- **Rate Limiting** - Prevents API quota exhaustion
-- **Error Handling** - Graceful fallbacks for API failures
-
-## 🚀 Deployment
-
-### Vercel (Recommended)
+### Run
 
 ```bash
-# Install Vercel CLI
-npm i -g vercel
-
-# Deploy
-vercel --prod
+npm run dev
 ```
 
-Set environment variables in Vercel dashboard:
-- `VITE_GEMINI_API_KEY` - Your Google Gemini API key
-- `VITE_WALLET_CONNECT_PROJECT_ID` - Your WalletConnect project ID
-
-### Build for Production
-
-```bash
-npm run build
-```
-
-Deploy the `dist/` folder to your hosting platform.
-
-## 📝 License
-
-This project is open source and available under the MIT License.
-
-## 🙏 Acknowledgments
-
-- **LI.FI** - Cross-chain liquidity and execution layer
-- **Google Gemini AI** - Powering all strategy intelligence
-- **React Team** - Modern UI framework
-- **Vite** - Next-generation build tool
+Open **http://localhost:3000**
 
 ---
 
-**Built with ❤️ for cross-chain DeFi optimization**
+## 🏗️ Architecture
+
+```mermaid
+flowchart TB
+    subgraph User["👤 User"]
+        NL[Natural Language Input]
+    end
+
+    subgraph Frontend["Frontend (React + Vite)"]
+        IntentChat[Intent Chat]
+        FlowCanvas[Flow Canvas]
+        OneClick[One-Click Yield]
+        ArbExec[Arbitrage Executor]
+    end
+
+    subgraph AI["AI Layer"]
+        Gemini[Gemini 2.0 Flash]
+        useAgentChat[useAgentChat Hook]
+        agentTools[Agent Tools]
+    end
+
+    subgraph Services["Service Layer"]
+        lifi[LI.FI Service]
+        arc[Arc Integration]
+        yieldFetcher[Yield Fetcher]
+        priceFetcher[Price Fetcher]
+        portfolioTracker[Portfolio Tracker]
+    end
+
+    subgraph External["External APIs"]
+        lifiAPI[LI.FI API]
+        defiLlama[DeFiLlama]
+        RPC[RPCs]
+    end
+
+    subgraph Chains["Chains"]
+        ETH[Ethereum]
+        ARB[Arbitrum]
+        OP[Optimism]
+        MATIC[Polygon]
+        BASE[Base]
+        AVAX[Avalanche]
+    end
+
+    NL --> IntentChat
+    IntentChat --> useAgentChat
+    useAgentChat --> Gemini
+    useAgentChat --> agentTools
+
+    agentTools --> lifi
+    agentTools --> yieldFetcher
+
+    lifi --> arc
+    lifi --> lifiAPI
+    yieldFetcher --> defiLlama
+    priceFetcher --> RPC
+    portfolioTracker --> lifi
+
+    lifiAPI --> Chains
+    RPC --> Chains
+
+    FlowCanvas --> lifi
+    OneClick --> yieldFetcher
+    OneClick --> lifi
+    ArbExec --> priceFetcher
+    ArbExec --> lifi
+```
+
+**Data flow:**
+1. User types natural language → **Intent Chat**
+2. **useAgentChat** (Vercel AI SDK) sends to **Gemini**, which decides which tools to call
+3. **Agent Tools** (`getUSDCBalances`, `getSwapQuote`, `getBestYields`) call **Services**
+4. **LI.FI** routes USDC→USDC via **Arc (CCTP)** or other bridges for token swaps
+5. **DeFiLlama** provides yield data; **Price Fetcher** compares DEX prices across chains
+
+**Agent coordination (Flow Canvas):**
+
+```mermaid
+flowchart LR
+    PA[Paul Atreides\nCommander]
+    CH[Chani\nNavigator]
+    IR[Irulan\nArchivist]
+    LK[Liet-Kynes\nMerchant]
+    DI[Duncan Idaho\nSentinel]
+    TH[Thufir Hawat\nOracle]
+    ST[Stilgar\nExecutor]
+
+    PA -->|coordinates| CH
+    PA -->|coordinates| IR
+    PA -->|coordinates| LK
+    PA -->|approves| DI
+    PA -->|commands| ST
+    CH -->|opportunities| ST
+    LK -->|yield routes| DI
+    DI -->|validates| ST
+    TH -->|rebalance| ST
+    IR -->|positions| PA
+```
+
+---
+
+## 📁 Project Structure
+
+```
+lifi-agents-orchestrator/
+├── components/          # React UI
+│   ├── IntentChat.tsx   # Natural-language chat (DeFi Agent)
+│   ├── FlowCanvas.tsx   # Agent node visualization
+│   ├── OneClickYield.tsx
+│   ├── ArbitrageExecutor.tsx
+│   └── ...
+├── services/
+│   ├── agentTools.ts    # Chat tools: balances, swap quotes, yields
+│   ├── lifi.ts         # LI.FI + Arc/CCTP integration
+│   ├── yieldFetcher.ts # DeFiLlama yield data
+│   ├── priceFetcher.ts # Cross-chain price comparison
+│   └── ...
+├── hooks/
+│   └── useAgentChat.ts # Vercel AI SDK + Gemini
+├── constants.ts        # Agent definitions (Dune names)
+└── App.tsx
+```
+
+---
+
+## 🔧 Tech Stack
+
+| Layer | Stack |
+|-------|-------|
+| **Frontend** | React 19, TypeScript, Vite |
+| **AI** | Vercel AI SDK, Google Gemini 2.0 Flash |
+| **DeFi** | LI.FI SDK, Arc (Circle CCTP), DeFiLlama |
+| **Wallet** | Wagmi, Viem, WalletConnect |
+
+---
+
+## 🛣️ How Swaps Work
+
+- **USDC → USDC (cross-chain):** Uses **Arc (Circle CCTP)** — native burn on source, mint on destination.
+- **USDC → ETH, ETH → USDC, etc.:** Uses **LI.FI** to find the best route across bridges and DEXs.
+- **Small amounts (< 10 USDC):** Tries all bridges first; may suggest 10–25+ USDC for better routing.
+
+---
+
+## 📊 Yield Sources
+
+Yields come from **DeFiLlama** — aggregated from Aave, Compound, Morpho, Yearn, Lido, Curve, and hundreds more. Filtered by:
+
+- Chains: Ethereum, Arbitrum, Optimism, Polygon, Base, Avalanche  
+- Tokens: USDC, USDT, DAI, WETH  
+- Min TVL: $100k–$1M (configurable)
+
+---
+
+## 🔐 Security & Privacy
+
+- API keys stored in `.env` (never committed)
+- AI runs client-side (Gemini API)
+- No server-side storage of private keys or sensitive data
+- Rate limiting to avoid quota exhaustion
+
+---
+
+## 📝 License
+
+MIT
+
+---
+
+## 🙏 Acknowledgments
+
+- **LI.FI** — Cross-chain routing and execution
+- **Circle** — Arc / CCTP for native USDC
+- **DeFiLlama** — Yield and protocol data
+- **Google Gemini** — AI strategy and chat
+
+---
+
+**Built for cross-chain DeFi. The spice must flow.** 🌵

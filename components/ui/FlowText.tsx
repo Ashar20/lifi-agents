@@ -9,7 +9,7 @@ interface FlowTextProps {
 const FlowText: React.FC<FlowTextProps> = ({ children, className = '', speed = 3 }) => {
     return (
         <span
-            className={`inline-block bg-gradient-to-r from-neural-purple via-neural-cyan to-neural-purple bg-clip-text text-transparent ${className}`}
+            className={`inline-block bg-gradient-to-r from-spice-orange via-desert-sand to-spice-orange bg-clip-text text-transparent ${className}`}
             style={{
                 backgroundSize: '200% auto',
                 animation: `gradient-flow ${speed}s linear infinite`,

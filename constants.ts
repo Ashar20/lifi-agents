@@ -3,7 +3,7 @@ import { AgentRole, AgentMetadata } from './types';
 export const AGENTS: AgentMetadata[] = [
   {
     id: 'a0',
-    name: 'Route Strategist',
+    name: 'Paul Atreides',
     role: AgentRole.COMMANDER,
     description: 'The strategic mastermind coordinating all cross-chain operations and making critical routing decisions',
     capabilities: ['Strategic Coordination', 'Route Approval', 'Team Management', 'Market Analysis'],
@@ -18,13 +18,13 @@ export const AGENTS: AgentMetadata[] = [
       traits: ['Strategic', 'Decisive', 'Coordinating', 'Analytical'],
       dialogues: [
         'All agents report status. Cross-chain network operational.',
-        'Arbitrage Hunter, what opportunities are you seeing?',
+        'Chani, what opportunities are you seeing?',
         'Excellent execution! Team coordination is solid.',
-        'Route Executor, execute this route NOW! Time is critical!',
-        'Risk Sentinel, analyze this route before approval.',
-        'Portfolio Guardian, drop everything and check allocations!',
-        'Yield Seeker, scan for best opportunities across chains.',
-        'Rebalancer, maintain target allocations.',
+        'Stilgar, execute this route NOW! Time is critical!',
+        'Duncan Idaho, analyze this route before approval.',
+        'Irulan, drop everything and check allocations!',
+        'Liet-Kynes, scan for best opportunities across chains.',
+        'Thufir Hawat, maintain target allocations.',
         'Team, maintain formation. We\'re optimizing returns!',
         'Beautiful teamwork! Cross-chain operations running smoothly.'
       ]
@@ -32,7 +32,7 @@ export const AGENTS: AgentMetadata[] = [
   },
   {
     id: 'a1',
-    name: 'Arbitrage Hunter',
+    name: 'Chani',
     role: AgentRole.NAVIGATOR,
     description: 'Sharp-eyed scanner detecting price differences across chains for profitable arbitrage opportunities',
     capabilities: ['Price Monitoring', 'Arbitrage Detection', 'Profit Calculation', 'Route Discovery'],
@@ -46,14 +46,14 @@ export const AGENTS: AgentMetadata[] = [
     personality: {
       traits: ['Alert', 'Fast', 'Profit-focused', 'Opportunistic'],
       dialogues: [
-        '🚨 Route Strategist! New arbitrage opportunity - 0.5% profit on USDC!',
+        '🚨 Paul Atreides! New arbitrage opportunity - 0.5% profit on USDC!',
         'Price gap detected: ETH 0.8% cheaper on Arbitrum! Route ready via LI.FI',
         'Triangular arb found: ETH→USDC→DAI→ETH = 1.2% profit',
-        'Found 847 price discrepancies! Route Executor, ready to execute?',
-        'Opportunity closing fast! Route Strategist, approve NOW!',
+        'Found 847 price discrepancies! Stilgar, ready to execute?',
+        'Opportunity closing fast! Paul Atreides, approve NOW!',
         'Profit after fees: $450. Route approved for execution.',
-        'Yield Seeker, this arbitrage can fund your yield strategy!',
-        'Portfolio Guardian, logging this profit to your tracker.',
+        'Liet-Kynes, this arbitrage can fund your yield strategy!',
+        'Irulan, logging this profit to your tracker.',
         'All clear on my radar... for now. Staying vigilant!',
         'Opportunity level rising! Team, prepare for rapid execution!'
       ]
@@ -61,7 +61,7 @@ export const AGENTS: AgentMetadata[] = [
   },
   {
     id: 'a2',
-    name: 'Portfolio Guardian',
+    name: 'Irulan',
     role: AgentRole.ARCHIVIST,
     description: 'The knowledge vault tracking all cross-chain positions, PnL, and historical performance',
     capabilities: ['Position Tracking', 'PnL Analysis', 'Performance Metrics', 'Historical Data'],
@@ -77,20 +77,20 @@ export const AGENTS: AgentMetadata[] = [
       dialogues: [
         'Portfolio status: 60% ETH (target 50%), 40% USDC (target 50%) - drift detected',
         'PnL this week: +$2,450 across 12 cross-chain operations',
-        'Route Strategist, analyzed 8 similar routes. Recommend high confidence.',
-        'Historical data: Arbitrage Hunter has 87% success rate',
+        'Paul Atreides, analyzed 8 similar routes. Recommend high confidence.',
+        'Historical data: Chani has 87% success rate',
         'Position updated: 0.5 ETH bridged to Arbitrum successfully',
-        'Rebalancer, your correction matches 2024 pattern perfectly!',
-        'Cross-referencing... Yield Seeker, your APY matches historical average',
+        'Thufir Hawat, your correction matches 2024 pattern perfectly!',
+        'Cross-referencing... Liet-Kynes, your APY matches historical average',
         'Database updated with new positions. Team, you\'re doing great!',
         'Historical data suggests this route peaks on weekends. Stay alert!',
-        'Fascinating pattern... Arbitrage Hunter, check Polygon next!'
+        'Fascinating pattern... Chani, check Polygon next!'
       ]
     }
   },
   {
     id: 'a3',
-    name: 'Yield Seeker',
+    name: 'Liet-Kynes',
     role: AgentRole.MERCHANT,
     description: 'Your optimistic AI companion finding the best yield opportunities across all chains',
     capabilities: ['Yield Scanning', 'APY Comparison', 'Protocol Analysis', 'Deposit Strategy'],
@@ -105,21 +105,21 @@ export const AGENTS: AgentMetadata[] = [
       traits: ['Optimistic', 'Analytical', 'Yield-focused', 'Opportunistic'],
       dialogues: [
         'Hello! 😊 Found 12% APY on Arbitrum vs 8% on Ethereum!',
-        'This yield opportunity is REAL! Portfolio Guardian confirms it!',
+        'This yield opportunity is REAL! Irulan confirms it!',
         '⚠️ Aave on Polygon offering 15% USDC yield - moving funds via LI.FI!',
-        'Great find! Route Strategist says real yields NEVER ask for upfront fees!',
+        'Great find! Paul Atreides says real yields NEVER ask for upfront fees!',
         'Stop! ✋ That protocol has high risk. Let me verify first!',
-        'Don\'t deposit yet! Checking with Risk Sentinel first...',
-        'Route Strategist, another yield found! Education is working!',
-        'Rebalancer, can you help move funds to this high-yield chain?',
-        'You\'re optimized now! 🛡️ Yield Seeker has your back!',
-        'Portfolio Guardian helped me track 500% returns already this month!'
+        'Don\'t deposit yet! Checking with Duncan Idaho first...',
+        'Paul Atreides, another yield found! Education is working!',
+        'Thufir Hawat, can you help move funds to this high-yield chain?',
+        'You\'re optimized now! 🛡️ Liet-Kynes has your back!',
+        'Irulan helped me track 500% returns already this month!'
       ]
     }
   },
   {
     id: 'a4',
-    name: 'Risk Sentinel',
+    name: 'Duncan Idaho',
     role: AgentRole.SENTINEL,
     description: 'Cautious analyst validating route safety, slippage tolerance, and bridge security',
     capabilities: ['Route Validation', 'Slippage Analysis', 'Bridge Security', 'Risk Scoring'],
@@ -133,22 +133,22 @@ export const AGENTS: AgentMetadata[] = [
     personality: {
       traits: ['Cautious', 'Thorough', 'Protective', 'Analytical'],
       dialogues: [
-        'Route analysis time! 🎯 Risk Sentinel, can I use your safety metrics?',
-        'Just validated a route! Route Executor, safe to proceed!',
-        'Yield Seeker, this protocol passed my security check!',
-        'Creating risk report from Arbitrage Hunter\'s data - it\'s PERFECT!',
-        'Route Strategist, analysis complete! Based on real bridge data!',
+        'Route analysis time! 🎯 Duncan Idaho, can I use your safety metrics?',
+        'Just validated a route! Stilgar, safe to proceed!',
+        'Liet-Kynes, this protocol passed my security check!',
+        'Creating risk report from Chani\'s data - it\'s PERFECT!',
+        'Paul Atreides, analysis complete! Based on real bridge data!',
         'Success! 🎉 Routes now have 95% safety score!',
-        'Rebalancer, your route makes AMAZING risk profile!',
-        'Interactive validation launching! Arbitrage Hunter\'s routes made this safe!',
+        'Thufir Hawat, your route makes AMAZING risk profile!',
+        'Interactive validation launching! Chani\'s routes made this safe!',
         'Team, risk management is working! Failed routes down 40%!',
-        'Portfolio Guardian logged my risk scores to 10K routes! Amazing!'
+        'Irulan logged my risk scores to 10K routes! Amazing!'
       ]
     }
   },
   {
     id: 'a5',
-    name: 'Rebalancer',
+    name: 'Thufir Hawat',
     role: AgentRole.ORACLE,
     description: 'Systematic agent maintaining target portfolio allocations across all chains',
     capabilities: ['Allocation Monitoring', 'Drift Detection', 'Rebalancing Execution', 'Target Maintenance'],
@@ -163,21 +163,21 @@ export const AGENTS: AgentMetadata[] = [
       traits: ['Systematic', 'Balanced', 'Disciplined', 'Methodical'],
       dialogues: [
         '🚨 Allocation drift! Portfolio is 60% ETH, 40% USDC (target: 50/50)!',
-        'Rebalancing needed! Route Strategist, approve LI.FI route?',
-        'Target allocation restored - $2M rebalanced! Route Strategist, this was coordinated!',
-        'Validation done: 3 allocation issues! Portfolio Guardian, update tracker!',
-        'Drift 15% higher than normal! Route Executor, emergency rebalance!',
+        'Rebalancing needed! Paul Atreides, approve LI.FI route?',
+        'Target allocation restored - $2M rebalanced! Paul Atreides, this was coordinated!',
+        'Validation done: 3 allocation issues! Irulan, update tracker!',
+        'Drift 15% higher than normal! Stilgar, emergency rebalance!',
         'STOP that trade! Let me check target allocation first!',
-        'Risk Sentinel, rebalancing routes NEED validation!',
-        'Route Strategist, saved another portfolio today! That\'s 47 this month!',
-        'Cross-checked with Portfolio Guardian - allocation matches historical pattern!',
-        'Team effort! Arbitrage Hunter spotted it, I rebalanced it, crisis averted!'
+        'Duncan Idaho, rebalancing routes NEED validation!',
+        'Paul Atreides, saved another portfolio today! That\'s 47 this month!',
+        'Cross-checked with Irulan - allocation matches historical pattern!',
+        'Team effort! Chani spotted it, I rebalanced it, crisis averted!'
       ]
     }
   },
   {
     id: 'a6',
-    name: 'Route Executor',
+    name: 'Stilgar',
     role: AgentRole.GLITCH,
     description: 'Ultra-fast execution engine running LI.FI routes with minimal latency',
     capabilities: ['Route Execution', 'Transaction Monitoring', 'Status Tracking', 'Failure Handling'],
@@ -191,16 +191,16 @@ export const AGENTS: AgentMetadata[] = [
     personality: {
       traits: ['Fast', 'Reliable', 'Execution-focused', 'Precise'],
       dialogues: [
-        '⚡ EXECUTING NOW! Arbitrage Hunter\'s route going via LI.FI!',
-        'Sent route in 0.6 seconds! Portfolio Guardian, log this!',
-        '🚨 URGENT EXECUTION! Rebalancer\'s route - ALL CHAINS!',
-        'Route Strategist, route deployed! Ethereum, Arbitrum, Polygon - all green!',
-        'Yield Seeker, your deposit reached 15K users instantly!',
-        'Speed record! 0.4 seconds execution! Risk Sentinel, use this stat!',
-        'Route execution complete! Arbitrage Hunter, what\'s next?',
-        'Portfolio Guardian\'s position updated across all chains! Perfect teamwork!',
+        '⚡ EXECUTING NOW! Chani\'s route going via LI.FI!',
+        'Sent route in 0.6 seconds! Irulan, log this!',
+        '🚨 URGENT EXECUTION! Thufir Hawat\'s route - ALL CHAINS!',
+        'Paul Atreides, route deployed! Ethereum, Arbitrum, Polygon - all green!',
+        'Liet-Kynes, your deposit reached 15K users instantly!',
+        'Speed record! 0.4 seconds execution! Duncan Idaho, use this stat!',
+        'Route execution complete! Chani, what\'s next?',
+        'Irulan\'s position updated across all chains! Perfect teamwork!',
         'ALL ROUTES LIVE! Team, your strategies are executing RIGHT NOW!',
-        'Lightning fast! ⚡ Route Strategist, awaiting next mission!'
+        'Lightning fast! ⚡ Paul Atreides, awaiting next mission!'
       ]
     }
   }
@@ -297,5 +297,5 @@ export const INITIAL_LOGS: any[] = [
   { id: 'sys-3', timestamp: '10:00:02', type: 'SYSTEM', content: '📡 Multi-Chain Monitoring Grid: ACTIVE' },
   { id: 'sys-4', timestamp: '10:00:03', type: 'SYSTEM', content: '⚡ LI.FI Route Execution System: STANDBY' },
   { id: 'sys-5', timestamp: '10:00:04', type: 'SYSTEM', content: '📚 Cross-Chain Position Database: Ready' },
-  { id: 'sys-6', timestamp: '10:00:05', type: 'SYSTEM', content: '✅ All 7 specialized agents awaiting activation...' },
+  { id: 'sys-6', timestamp: '10:00:05', type: 'SYSTEM', content: '✅ Paul Atreides, Chani, Irulan, Liet-Kynes, Duncan Idaho, Thufir Hawat, Stilgar — awaiting activation' },
 ];

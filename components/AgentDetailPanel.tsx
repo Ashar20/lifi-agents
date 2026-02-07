@@ -175,7 +175,7 @@ const AgentDetailPanel: React.FC<AgentDetailPanelProps> = ({
                 </div>
             </div>
 
-            {/* Wallet Address Input for Portfolio Guardian */}
+            {/* Wallet Address Input for Irulan */}
             {isPortfolioGuardian && (
               <div className="space-y-2">
                 <label className="text-xs text-gray-500 font-mono uppercase flex items-center gap-2">
@@ -190,7 +190,7 @@ const AgentDetailPanel: React.FC<AgentDetailPanelProps> = ({
                   className="w-full px-3 py-2 bg-black/40 border border-white/20 rounded text-white placeholder-gray-500 focus:border-neon-green focus:outline-none font-mono text-sm"
                 />
                 <p className="text-[10px] text-gray-500 font-mono">
-                  Portfolio Guardian will track balances for this address across all chains. 
+                  Irulan will track balances for this address across all chains. 
                   {!walletAddress && ' Using demo address if empty.'}
                 </p>
               </div>

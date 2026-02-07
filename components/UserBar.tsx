@@ -1,14 +1,17 @@
 import React from 'react';
-import { LogOut } from 'lucide-react';
+import { LogOut, RotateCcw, Activity } from 'lucide-react';
 import { authService } from '../services/auth';
 import { WalletConnect } from './WalletConnect';
 
 interface UserBarProps {
   onLogoClick?: () => void;
   onLogout: () => void;
+  onReset?: () => void;
+  taskResultsCount?: number;
+  onShowDashboard?: () => void;
 }
 
-const UserBar: React.FC<UserBarProps> = ({ onLogoClick, onLogout }) => {
+const UserBar: React.FC<UserBarProps> = ({ onLogoClick, onLogout, onReset, taskResultsCount = 0, onShowDashboard }) => {
   const user = authService.getCurrentUser();
 
   const handleLogout = () => {
@@ -33,8 +36,27 @@ const UserBar: React.FC<UserBarProps> = ({ onLogoClick, onLogout }) => {
           </div>
         </button>
 
-        {/* Right Side: Wallet + User */}
+        {/* Right Side: Reset + Dashboard + Wallet + User */}
         <div className="flex items-center gap-4">
+          {onReset && (
+            <button
+              onClick={onReset}
+              className="flex items-center gap-2 px-3 py-2 rounded text-xs font-mono transition-all bg-white/5 hover:bg-red-500/20 border border-white/10 hover:border-red-500/30 text-gray-400 hover:text-red-400"
+              title="Reset workflow - deactivate all agents, clear connections and tasks"
+            >
+              <RotateCcw size={14} />
+              RESET
+            </button>
+          )}
+          {taskResultsCount > 0 && onShowDashboard && (
+            <button
+              onClick={onShowDashboard}
+              className="flex items-center gap-2 px-3 py-2 rounded text-xs font-mono bg-neural-purple/10 hover:bg-neural-purple/20 border border-neural-purple/30 text-neural-purple transition-all"
+            >
+              <Activity size={14} />
+              DASHBOARD ({taskResultsCount})
+            </button>
+          )}
           {/* Wallet Connection */}
           <WalletConnect />
 

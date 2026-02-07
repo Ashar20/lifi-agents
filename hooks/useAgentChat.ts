@@ -16,13 +16,17 @@ export interface ChatMessage {
 
 const SYSTEM_PROMPT = `You are a DeFi assistant for the LI.FI Agents Orchestrator. You help users with:
 - Checking USDC balances across chains (Ethereum, Arbitrum, Optimism, Polygon, Base, Avalanche)
-- Getting swap/bridge quotes for cross-chain USDC transfers (uses Arc/Circle CCTP for native burn/mint)
+- Getting swap/bridge quotes for ANY token pair: USDC→USDC, USDC→ETH, ETH→USDC, etc. (USDC→USDC uses Arc/CCTP; other pairs use LI.FI best route)
 - Finding the best yield opportunities (APY) for stablecoins
 - Comparing yields across protocols and chains
 
 Use the tools to fetch real data before answering. Be concise and human. When the user asks about their balance, yields, or swaps, call the appropriate tool first, then summarize the results in a friendly way.
 
-For USDC chain-to-chain swaps: we use Arc (Circle CCTP) - native USDC burn on source chain, mint on destination. This is the preferred route for USDC transfers. When presenting swap quotes, mention Arc if the tool returns usesArc: true.
+Swap rules:
+- USDC→USDC (chain to chain): Uses Arc (Circle CCTP). Any amount.
+- USDC→ETH, ETH→USDC, etc.: Uses LI.FI to find best route. Always use getSwapQuote - we support USDC, ETH, WETH, USDT, DAI.
+- For "swap USDC to ETH" without chain: assume same chain (e.g. USDC on Ethereum → ETH on Ethereum) or ask which chain.
+- When a quote fails, share the error reason with the user. For USDC under ~$10, bridges often need 10–25+ USDC—suggest trying a larger amount.
 
 If the user's request is vague (e.g. "can you swap?"), ask for clarification with examples based on their actual balance if you have it.
 
@@ -33,7 +37,10 @@ const google = createGoogleGenerativeAI({
   apiKey: import.meta.env.VITE_GEMINI_API_KEY,
 });
 
-export function useAgentChat(walletAddress: string) {
+const DEMO_WALLET = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
+
+export function useAgentChat(walletAddress: string | undefined) {
+  const effectiveAddress = walletAddress || DEMO_WALLET;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +60,7 @@ export function useAgentChat(walletAddress: string) {
       setError(null);
 
       try {
-        const tools = createAgentTools({ walletAddress });
+        const tools = createAgentTools({ walletAddress: effectiveAddress });
 
         const apiMessages = [
           ...messages
@@ -95,7 +102,7 @@ export function useAgentChat(walletAddress: string) {
         setIsLoading(false);
       }
     },
-    [walletAddress, messages, isLoading]
+    [effectiveAddress, messages, isLoading]
   );
 
   const clearMessages = useCallback(() => {

@@ -4,7 +4,7 @@ interface RippleButtonProps {
     children: React.ReactNode;
     onClick?: () => void;
     className?: string;
-    variant?: 'purple' | 'cyan' | 'amber';
+    variant?: 'spice' | 'sand' | 'fremen';
     disabled?: boolean;
 }
 
@@ -12,7 +12,7 @@ const RippleButton: React.FC<RippleButtonProps> = ({
     children,
     onClick,
     className = "",
-    variant = 'purple',
+    variant = 'spice',
     disabled = false
 }) => {
     const [ripples, setRipples] = useState<Array<{ x: number; y: number; id: number }>>([]);
@@ -36,9 +36,9 @@ const RippleButton: React.FC<RippleButtonProps> = ({
     };
 
     const colors = {
-        purple: 'bg-neural-purple hover:bg-neural-purple/90',
-        cyan: 'bg-neural-cyan hover:bg-neural-cyan/90',
-        amber: 'bg-neural-amber hover:bg-neural-amber/90',
+        spice: 'bg-spice-orange hover:bg-spice-orange/90',
+        sand: 'bg-desert-sand hover:bg-desert-sand/90',
+        fremen: 'bg-fremen-blue hover:bg-fremen-blue/90',
     };
 
     return (
@@ -47,11 +47,11 @@ const RippleButton: React.FC<RippleButtonProps> = ({
             disabled={disabled}
             className={`relative overflow-hidden ${colors[variant]} disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 ${className}`}
         >
-            {/* Ripple effects */}
+            {/* Ripple effects - sand dust style */}
             {ripples.map(ripple => (
                 <span
                     key={ripple.id}
-                    className="absolute bg-white/30 rounded-full animate-ripple"
+                    className="absolute bg-desert-sand/40 rounded-full animate-ripple"
                     style={{
                         left: ripple.x,
                         top: ripple.y,

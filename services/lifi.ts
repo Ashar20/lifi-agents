@@ -428,8 +428,12 @@ export const lifiService = {
       let quote: LifiStep | null = null;
       let bridgeUsed: string | undefined;
 
-      // For Arc-eligible routes, force Circle CCTP
-      if (canUseArc) {
+      // For small USDC (< 10), try standard routing first (some bridges have lower minimums)
+      const amountNum = parseFloat(params.fromAmount) / 1e6;
+      const isSmallUsdc = canUseArc && amountNum < 10;
+
+      // For Arc-eligible routes, prefer Circle CCTP (unless small amount - try all bridges first)
+      if (canUseArc && !isSmallUsdc) {
         console.log('[LI.FI] ⚡ Arc-eligible route detected - using Circle CCTP for native USDC');
         console.log(formatArcLog(getArcTransferInfo(
           params.fromChain,
