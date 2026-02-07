@@ -40,7 +40,7 @@ export interface PortfolioSummary {
 
 // Chain configurations with RPC endpoints
 const CHAIN_CONFIGS = {
-  1: { ...mainnet, name: 'Ethereum', rpc: 'https://eth.llamarpc.com' },
+  1: { ...mainnet, name: 'Ethereum', rpc: 'https://rpc.ankr.com/eth' },
   42161: { ...arbitrum, name: 'Arbitrum', rpc: 'https://arb1.arbitrum.io/rpc' },
   10: { ...optimism, name: 'Optimism', rpc: 'https://mainnet.optimism.io' },
   137: { ...polygon, name: 'Polygon', rpc: 'https://polygon-rpc.com' },

@@ -45,10 +45,10 @@ export const IntentChat: React.FC<IntentChatProps> = ({
   const exampleIntents = [
     "Make best use of 1 USDC from my wallet",
     "Put my USDC where it earns the most",
+    "Swap 100 USDC from Ethereum to Arbitrum",
     "Find me arbitrage opportunities across chains",
     "Rebalance my portfolio to match my targets",
-    "What's the best yield for my USDC right now?",
-    "Use my wallet - deploy wherever yield is highest"
+    "Bridge my USDC to Polygon for higher yield"
   ];
 
   return (
@@ -62,7 +62,7 @@ export const IntentChat: React.FC<IntentChatProps> = ({
           </h2>
         </div>
         <p className="text-gray-400 text-xs font-mono">
-          Tell me what you want - e.g. "make best use of 1 USDC from my wallet"
+          Be specific - e.g. &quot;Swap 100 USDC from Ethereum to Arbitrum&quot; or &quot;Put my USDC where it earns the most&quot;
         </p>
         {/* Wallet Status */}
         <div className={`mt-2 flex items-center gap-2 text-xs font-mono ${isConnected ? 'text-neon-green' : 'text-orange-400'}`}>

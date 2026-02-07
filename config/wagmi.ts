@@ -35,7 +35,7 @@ export const wagmiConfig = createConfig({
     ] : []),
   ],
   transports: {
-    [mainnet.id]: http('https://eth.llamarpc.com'),
+    [mainnet.id]: http('https://rpc.ankr.com/eth'),
     [arbitrum.id]: http('https://arb1.arbitrum.io/rpc'),
     [optimism.id]: http('https://mainnet.optimism.io'),
     [polygon.id]: http('https://polygon-rpc.com'),

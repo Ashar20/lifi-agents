@@ -1,10 +1,11 @@
 // Intent Parser - Analyzes user intents and determines agent connections
 
 export interface IntentAnalysis {
-  intentType: 'yield_optimization' | 'arbitrage' | 'rebalancing' | 'monitoring' | 'portfolio_check' | 'execute' | 'swap' | 'general';
+  intentType: 'yield_optimization' | 'arbitrage' | 'rebalancing' | 'monitoring' | 'portfolio_check' | 'execute' | 'swap' | 'swap_clarification' | 'general';
   requiredAgents: string[]; // Agent IDs
   connections: Array<{ source: string; target: string }>;
   description: string;
+  needsClarification?: boolean; // When true, don't trigger workflow - ask for details
 }
 
 export const parseIntent = (intent: string): IntentAnalysis => {
@@ -106,7 +107,33 @@ export const parseIntent = (intent: string): IntentAnalysis => {
     };
   }
   
-  // Swap / Bridge / Transfer patterns - IMMEDIATE EXECUTION
+  // Vague swap requests - ask for clarification with examples (check BEFORE specific swap)
+  const hasSwapSpecifics = (
+    /\d+/.test(intent) || // has a number (amount)
+    lowerIntent.includes('usdc') || lowerIntent.includes('usdt') || lowerIntent.includes('eth') ||
+    lowerIntent.includes('ethereum') || lowerIntent.includes('arbitrum') || lowerIntent.includes('polygon') ||
+    lowerIntent.includes('optimism') || lowerIntent.includes('base') || lowerIntent.includes('avalanche') ||
+    lowerIntent.includes('from') && lowerIntent.includes('to') // "from X to Y"
+  );
+  if (
+    (lowerIntent.includes('swap') || lowerIntent.includes('bridge') || lowerIntent.includes('transfer')) &&
+    !hasSwapSpecifics &&
+    (
+      lowerIntent.includes('can you') || lowerIntent.includes('could you') || lowerIntent.includes('perform') ||
+      lowerIntent.includes('do a ') || lowerIntent.includes('help me') || lowerIntent.includes('i want to') ||
+      lowerIntent.trim().split(/\s+/).length <= 4 // very short: "swap", "perform a swap", etc.
+    )
+  ) {
+    return {
+      intentType: 'swap_clarification',
+      requiredAgents: ['a0'],
+      connections: [],
+      description: "What type of swap would you like? For example: 'Swap 100 USDC from Ethereum to Arbitrum' or 'Bridge my USDC to Polygon for higher yield'.",
+      needsClarification: true,
+    };
+  }
+
+  // Swap / Bridge / Transfer patterns - IMMEDIATE EXECUTION (has specifics)
   if (
     lowerIntent.includes('swap') ||
     lowerIntent.includes('bridge') ||

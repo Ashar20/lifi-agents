@@ -24,7 +24,7 @@ import RippleButton from './components/ui/RippleButton';
 import { Activity, Zap, ArrowRightLeft, Bell, History, Wallet } from 'lucide-react';
 import { orchestrator, agentStatusManager, geminiService } from './services/api';
 import { authService } from './services/auth';
-import { parseIntent } from './services/intentParser';
+import { useAgentChat } from './hooks/useAgentChat';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import './toast-custom.css';
@@ -33,6 +33,17 @@ const App: React.FC = () => {
   // Wagmi wallet connection
   const { address: connectedAddress, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
+
+  // Helper: get wallet address for agents (prefer connected, then localStorage, then demo)
+  const getWalletAddressForAgents = useCallback(() => {
+    if (isConnected && connectedAddress) return connectedAddress;
+    const stored = localStorage.getItem('trackedWalletAddress');
+    if (stored && stored.startsWith('0x')) return stored;
+    return '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'; // Demo fallback
+  }, [isConnected, connectedAddress]);
+
+  // Agent chat (Vercel AI SDK with LI.FI/DeFi tools) - must be early so callbacks can reference it
+  const agentChat = useAgentChat(getWalletAddressForAgents());
 
   // Auto-create guest session on first load
   useEffect(() => {
@@ -106,16 +117,6 @@ const App: React.FC = () => {
 
   // --- Commander Custom Order ---
   const [commanderCustomOrder, setCommanderCustomOrder] = useState<string>('');
-
-  // --- Intent Chat State ---
-  const [chatMessages, setChatMessages] = useState<Array<{
-    id: string;
-    type: 'user' | 'system' | 'agent';
-    content: string;
-    timestamp: number;
-    agentName?: string;
-  }>>([]);
-  const [isProcessingIntent, setIsProcessingIntent] = useState(false);
 
   // --- Execution State ---
   const [pendingExecution, setPendingExecution] = useState<{
@@ -254,7 +255,7 @@ const App: React.FC = () => {
     setPersistentEdges([]);
     setTaskResults([]);
     setLogs(INITIAL_LOGS);
-    setChatMessages([]);
+    agentChat.clearMessages();
     setAgentStatuses({});
     setAgentProgress({});
     setSelectedAgentId(null);
@@ -268,7 +269,7 @@ const App: React.FC = () => {
     localStorage.removeItem('taskResults');
     addLog('SYSTEM', '🔄 Workflow reset. All agents deactivated, connections cleared.');
     toast.info('Workflow reset complete');
-  }, [addLog]);
+  }, [addLog, agentChat]);
 
   // Activate agent
   const handleActivateAgent = useCallback((agentId: string) => {
@@ -322,14 +323,6 @@ const App: React.FC = () => {
     addLog('SYSTEM', `✅ ${agent.name} has been removed from the team.`);
     toast.success(`${agent.name} removed successfully`);
   }, [addLog]);
-
-  // Helper: get wallet address for agents (prefer connected, then localStorage, then demo)
-  const getWalletAddressForAgents = useCallback(() => {
-    if (isConnected && connectedAddress) return connectedAddress;
-    const stored = localStorage.getItem('trackedWalletAddress');
-    if (stored && stored.startsWith('0x')) return stored;
-    return '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045'; // Demo fallback
-  }, [isConnected, connectedAddress]);
 
   // Execute agent task (AI-powered)
   const executeAgentTask = useCallback(async (agentId: string, taskDescription?: string) => {
@@ -886,7 +879,7 @@ const App: React.FC = () => {
                 timestamp: Date.now(),
                 agentName: 'Route Executor'
               };
-              setChatMessages(prev => [...prev, successMessage]);
+              agentChat.appendMessage(successMessage);
 
               result = {
                 type: 'cross_chain_swap',
@@ -1054,14 +1047,11 @@ const App: React.FC = () => {
       setPendingExecution(null);
 
       // Add success message to chat
-      const successMessage = {
-        id: `msg_${Date.now()}_exec_success`,
-        type: 'agent' as const,
+      agentChat.appendMessage({
+        type: 'agent',
         content: `Route Executor: ✅ Transaction executed successfully! ${pendingExecution.summary}. TX hash: ${(result.transactionHash || result.hash || 'pending').slice(0, 10)}...`,
-        timestamp: Date.now(),
         agentName: 'Route Executor'
-      };
-      setChatMessages(prev => [...prev, successMessage]);
+      });
 
     } catch (error: any) {
       console.error('Execution error:', error);
@@ -1070,7 +1060,7 @@ const App: React.FC = () => {
     } finally {
       setIsExecuting(false);
     }
-  }, [pendingExecution, walletClient, addLog]);
+  }, [pendingExecution, walletClient, addLog, agentChat]);
 
   // Cancel pending execution
   const handleCancelExecution = useCallback(() => {
@@ -1143,179 +1133,6 @@ const App: React.FC = () => {
       }
     }
   }, [operationMode, activeAgents, executeAgentTask, addLog]);
-
-  // Handle intent submission
-  const handleIntentSubmit = useCallback(async (intent: string) => {
-    const userMessage = {
-      id: `msg_${Date.now()}_user`,
-      type: 'custom_order' as any, // Cast to any to bypass strict type check for now, or update TaskType definition as const,
-      content: intent,
-      timestamp: Date.now()
-    };
-    setChatMessages(prev => [...prev, userMessage]);
-    setIsProcessingIntent(true);
-
-    const analysis = parseIntent(intent);
-    const agentNames = analysis.requiredAgents
-      .map(id => AGENTS.find(a => a.id === id)?.name)
-      .filter((n): n is string => !!n);
-
-    // Get the actual wallet address for contextual responses
-    const walletAddress = getWalletAddressForAgents();
-    const isRealWallet = isConnected && connectedAddress === walletAddress;
-
-    // For balance/portfolio queries, fetch real data first for context
-    let portfolioContext = '';
-    if (analysis.intentType === 'portfolio_check' || intent.toLowerCase().includes('usdc') || intent.toLowerCase().includes('balance')) {
-      try {
-        const { lifiService } = await import('./services/lifi');
-        const usdcBalances = await lifiService.getUSDCBalances(walletAddress);
-
-        if (usdcBalances.length > 0) {
-          const totalUsdc = usdcBalances.reduce((sum, b) => sum + b.balanceFormatted, 0);
-          const balanceDetails = usdcBalances.map(b => `${b.chainName}: ${b.balanceFormatted.toFixed(2)} USDC`).join(', ');
-          portfolioContext = `\n\nWallet ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)} has ${totalUsdc.toFixed(2)} USDC total (${balanceDetails})`;
-        } else {
-          portfolioContext = `\n\nWallet ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)} has no USDC detected across supported chains.`;
-        }
-
-        if (!isRealWallet) {
-          portfolioContext += ' (Note: Using tracked wallet, not connected wallet)';
-        }
-      } catch (error) {
-        console.warn('Failed to fetch USDC balances for context:', error);
-        portfolioContext = '\n\n(Could not fetch wallet balances - connect wallet for accurate data)';
-      }
-    }
-
-    // Get dynamic, contextual responses from Gemini (avoids robotic predefined phrases)
-    const responses = await geminiService.generateIntentResponses(
-      intent + portfolioContext,
-      analysis.intentType,
-      agentNames
-    );
-    const systemContent = responses.systemMessage || analysis.description;
-
-    // Add system message
-    const systemMessage = {
-      id: `msg_${Date.now()}_system`,
-      type: 'system' as const,
-      content: systemContent,
-      timestamp: Date.now()
-    };
-    setChatMessages(prev => [...prev, systemMessage]);
-
-    // Activate required agents
-    const agentsToActivate = analysis.requiredAgents.filter(id => !activeAgents.includes(id));
-    if (agentsToActivate.length > 0) {
-      agentsToActivate.forEach(agentId => {
-        const agent = AGENTS.find(a => a.id === agentId);
-        if (agent) {
-          handleActivateAgent(agentId);
-          addLog('SYSTEM', `🤖 Auto-activated ${agent.name} for intent execution`);
-        }
-      });
-    }
-
-    // Create connections
-    const newConnections = [...persistentEdges];
-    analysis.connections.forEach(conn => {
-      const exists = newConnections.some(
-        e => e.source === conn.source && e.target === conn.target
-      );
-      if (!exists) newConnections.push(conn);
-    });
-    setPersistentEdges(newConnections);
-    localStorage.setItem('agentConnections', JSON.stringify(newConnections));
-
-    // Add agent messages - use dynamic responses when available
-    const fallbackResponses: Record<string, string> = {
-      a0: "Got it, I'm coordinating the team.",
-      a1: "Checking prices across chains...",
-      a2: "Seeing what you've got across chains.",
-      a3: "Finding the best yields for you.",
-      a4: "Running the numbers - safety first.",
-      a5: "Making sure you're on target.",
-      a6: "Ready to execute when you are.",
-    };
-    analysis.requiredAgents.forEach((agentId, idx) => {
-      const agent = AGENTS.find(a => a.id === agentId);
-      if (agent) {
-        const content = responses.agentMessages?.[agent.name]
-          || fallbackResponses[agentId]
-          || "On it.";
-        const agentMessage = {
-          id: `msg_${Date.now()}_${agentId}_${idx}`,
-          type: 'agent' as const,
-          content: `${agent.name}: ${content}`,
-          timestamp: Date.now(),
-          agentName: agent.name
-        };
-        setChatMessages(prev => [...prev, agentMessage]);
-      }
-    });
-
-    setIsProcessingIntent(false);
-
-    // For portfolio checks, show balance directly in chat without workflow
-    if (analysis.intentType === 'portfolio_check' && portfolioContext) {
-      // Add a direct balance response to the chat
-      const balanceMessage = {
-        id: `msg_${Date.now()}_balance`,
-        type: 'agent' as const,
-        content: `Portfolio Guardian: ${portfolioContext.replace(/\n\n/g, '').trim()}`,
-        timestamp: Date.now(),
-        agentName: 'Portfolio Guardian'
-      };
-      setChatMessages(prev => [...prev, balanceMessage]);
-      toast.success("Balance fetched!");
-      // Don't trigger agent workflow for simple balance checks
-      return;
-    }
-
-    // For yield optimization - AUTO-EXECUTE: find best yield and move funds
-    if (analysis.intentType === 'yield_optimization') {
-      toast.info('🔍 Finding best yields and preparing to deploy your funds...');
-      // Trigger Yield Seeker to find best opportunities
-      setTimeout(() => executeAgentTask('a3', `Find best yield for: ${intent}`), 500);
-      // Trigger Risk Sentinel to validate
-      setTimeout(() => executeAgentTask('a4', 'Validate yield opportunity for safety'), 1500);
-      // Trigger Route Executor to move funds to best yield
-      setTimeout(() => executeAgentTask('a6', `Deploy funds to best yield: ${intent}`), 2500);
-      return;
-    }
-
-    // For arbitrage - AUTO-EXECUTE: find and execute arbitrage
-    if (analysis.intentType === 'arbitrage') {
-      toast.info('🔍 Scanning for arbitrage opportunities...');
-      // Trigger Arbitrage Hunter to find opportunities
-      setTimeout(() => executeAgentTask('a1', `Find arbitrage: ${intent}`), 500);
-      // Trigger Risk Sentinel to validate
-      setTimeout(() => executeAgentTask('a4', 'Validate arbitrage route for safety'), 1500);
-      // Trigger Route Executor to execute arbitrage
-      setTimeout(() => executeAgentTask('a6', `Execute arbitrage: ${intent}`), 2500);
-      return;
-    }
-
-    toast.success("All set! We're on it.");
-
-    // Auto-trigger workflows for specific intents with wallet context
-    if (analysis.intentType === 'execute') {
-      setTimeout(() => executeAgentTask('a0', 'Coordinate execution'), 600);
-      setTimeout(() => executeAgentTask('a6', 'Execute the route'), 3000);
-    }
-
-    // For swap/bridge intents, immediately trigger the Route Executor
-    if (analysis.intentType === 'swap') {
-      toast.info('🚀 Preparing your swap...');
-      // Trigger Route Strategist to coordinate
-      setTimeout(() => executeAgentTask('a0', `Coordinate swap: ${intent}`), 500);
-      // Trigger Risk Sentinel to validate
-      setTimeout(() => executeAgentTask('a4', 'Validate the swap route for safety'), 1500);
-      // Trigger Route Executor to prepare and execute the swap
-      setTimeout(() => executeAgentTask('a6', `Execute swap: ${intent}`), 2500);
-    }
-  }, [activeAgents, persistentEdges, handleActivateAgent, addLog, setPersistentEdges, executeAgentTask, getWalletAddressForAgents, isConnected, connectedAddress]);
 
   // Get selected agent
   const selectedAgent = selectedAgentId ? AGENTS.find(a => a.id === selectedAgentId) || null : null;
@@ -1503,9 +1320,9 @@ const App: React.FC = () => {
           <div className="flex-1 min-h-0 overflow-hidden">
             {rightPanelView === 'chat' ? (
               <IntentChat
-                onIntentSubmit={handleIntentSubmit}
-                messages={chatMessages}
-                isProcessing={isProcessingIntent}
+                onIntentSubmit={agentChat.submit}
+                messages={agentChat.messages}
+                isProcessing={agentChat.isLoading}
                 onSwitchToYield={() => setRightPanelView('yield')}
                 onSwitchToArbitrage={() => setRightPanelView('arbitrage')}
               />

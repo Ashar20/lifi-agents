@@ -30,7 +30,7 @@ export interface ArbitrageOpportunity {
 
 // Chain configurations
 const CHAINS = {
-  1: { name: 'Ethereum', rpc: 'https://eth.llamarpc.com' },
+  1: { name: 'Ethereum', rpc: 'https://rpc.ankr.com/eth' },
   42161: { name: 'Arbitrum', rpc: 'https://arb1.arbitrum.io/rpc' },
   10: { name: 'Optimism', rpc: 'https://mainnet.optimism.io' },
   137: { name: 'Polygon', rpc: 'https://polygon-rpc.com' },

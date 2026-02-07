@@ -17,7 +17,7 @@ const lifi = new LiFi({
 // Chain configurations
 export const CHAINS = {
   mainnet: [
-    { id: 1, name: 'Ethereum', chain: mainnet, rpc: 'https://eth.llamarpc.com', explorer: 'https://etherscan.io' },
+    { id: 1, name: 'Ethereum', chain: mainnet, rpc: 'https://rpc.ankr.com/eth', explorer: 'https://etherscan.io' },
     { id: 42161, name: 'Arbitrum', chain: arbitrum, rpc: 'https://arb1.arbitrum.io/rpc', explorer: 'https://arbiscan.io' },
     { id: 10, name: 'Optimism', chain: optimism, rpc: 'https://mainnet.optimism.io', explorer: 'https://optimistic.etherscan.io' },
     { id: 137, name: 'Polygon', chain: polygon, rpc: 'https://polygon-rpc.com', explorer: 'https://polygonscan.com' },

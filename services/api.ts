@@ -337,6 +337,61 @@ Generate a brief, professional status update (1-2 sentences max) about cross-cha
   },
 
   /**
+   * Generate contextual clarification when user asks vaguely (e.g. "can you perform a swap").
+   * Uses wallet balance to suggest examples that match what the user actually has.
+   */
+  async generateClarificationResponse(
+    userIntent: string,
+    topic: 'swap' | 'bridge' | 'yield' | 'arbitrage' | 'general',
+    walletContext?: {
+      walletAddress: string;
+      totalUsdc: number;
+      balanceDetails: string; // e.g. "Ethereum: 50.00 USDC, Arbitrum: 120.00 USDC"
+      hasBalance: boolean;
+    }
+  ): Promise<string> {
+    const fallbackNoBalance = 'What would you like to do? For example: "Swap 100 USDC from Ethereum to Arbitrum" or "Put my USDC where it earns the most".';
+    const fallbackWithBalance = walletContext?.hasBalance
+      ? `Based on your wallet (${walletContext.totalUsdc.toFixed(2)} USDC total: ${walletContext.balanceDetails}), what would you like? For example: "Swap ${Math.min(walletContext.totalUsdc, 100).toFixed(0)} USDC from Ethereum to Arbitrum" or "Put my USDC where it earns the most".`
+      : fallbackNoBalance;
+
+    if (!ai || !GEMINI_API_KEY || !rateLimiter.canMakeCall('gemini')) {
+      return walletContext?.hasBalance ? fallbackWithBalance : fallbackNoBalance;
+    }
+
+    const walletSection = walletContext?.hasBalance
+      ? `
+WALLET CONTEXT (use this to make examples personal and realistic):
+- Wallet: ${walletContext.walletAddress.slice(0, 6)}...${walletContext.walletAddress.slice(-4)}
+- Total USDC: ${walletContext.totalUsdc.toFixed(2)}
+- Per chain: ${walletContext.balanceDetails}
+
+IMPORTANT: Suggest examples using the user's ACTUAL amounts and chains. If they have 50 USDC on Ethereum, say "Swap 50 USDC from Ethereum to Arbitrum" - not "100 USDC". Use their real chain names from the balance details.`
+      : `
+WALLET CONTEXT: No USDC detected. Use generic examples with typical amounts (e.g. 100 USDC).`;
+
+    const prompt = `The user asked vaguely: "${userIntent}"
+
+They need clarification. Respond in 1-2 short sentences. Ask what specifically they want and give 2 concrete examples.
+${walletSection}
+
+Be friendly and helpful. Use their real wallet data when available - make it feel personal, not generic. Output ONLY the response text, no JSON, no quotes.`;
+
+    try {
+      rateLimiter.recordCall('gemini');
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+      });
+      const text = (response.text || '').trim().replace(/^["']|["']$/g, '');
+      return text.slice(0, 400) || (walletContext?.hasBalance ? fallbackWithBalance : fallbackNoBalance);
+    } catch (e) {
+      console.warn('generateClarificationResponse error:', e);
+      return walletContext?.hasBalance ? fallbackWithBalance : fallbackNoBalance;
+    }
+  },
+
+  /**
    * Generate dynamic, contextual responses for intent chat.
    * Avoids robotic predefined phrases - responds naturally to what the user actually said.
    */
@@ -345,8 +400,19 @@ Generate a brief, professional status update (1-2 sentences max) about cross-cha
     intentType: string,
     agentNames: string[]
   ): Promise<{ systemMessage: string; agentMessages: Record<string, string> }> {
+    // Contextual fallbacks when Gemini unavailable – reference what they asked
+    const fallbackByIntent: Record<string, string> = {
+      yield_optimization: "Scanning for the best yields across chains.",
+      arbitrage: "Looking for price gaps now.",
+      swap: "Preparing your swap.",
+      portfolio_check: "Checking your balances.",
+      rebalancing: "Checking your allocations.",
+      execute: "Running it now.",
+      monitoring: "Keeping an eye on your positions.",
+      general: "On it – coordinating the team.",
+    };
     const fallback: { systemMessage: string; agentMessages: Record<string, string> } = {
-      systemMessage: "Got it! We're on it.",
+      systemMessage: fallbackByIntent[intentType] || "On it.",
       agentMessages: {}
     };
 
@@ -355,17 +421,20 @@ Generate a brief, professional status update (1-2 sentences max) about cross-cha
     }
 
     const agentList = agentNames.join(', ');
-    const prompt = `You're writing responses for a DeFi agent chat. The user just said: "${userIntent}"
+    const prompt = `You're writing chat responses for a DeFi app. The user said: "${userIntent}"
 
-Intent type: ${intentType}
-Agents responding: ${agentList}
+Intent: ${intentType}. Agents: ${agentList}.
 
-Generate natural, human responses - NOT robotic or scripted. Match the user's tone and wording. Be brief (1 short sentence each).
+RULES:
+- Sound like a real person, not a bot. Use casual language.
+- Echo or reference what THEY said – don't give generic "Got it!" or "We're on it!"
+- BAD: "Got it! We're on it." / "Acknowledged." / "Processing your request."
+- GOOD: "I'll find the best yield for that." / "Scanning for arbitrage now." / "Checking your balances across chains."
+- Be brief. One short sentence for systemMessage, one per agent.
+- Match their tone – if they're casual, be casual.
 
-Respond with ONLY valid JSON in this exact format, no other text:
-{"systemMessage":"one short sentence acknowledging what they asked","agentMessages":{"Agent Name":"their brief reply","Agent Name 2":"their brief reply"}}
-
-Each agent message should feel like a real person responding to THIS specific request - not a generic status update. Vary the phrasing.`;
+Respond with ONLY valid JSON, no other text:
+{"systemMessage":"one short sentence that references their request","agentMessages":{"Agent Name":"their brief reply","Agent Name 2":"their brief reply"}}`;
 
     try {
       rateLimiter.recordCall('gemini');
