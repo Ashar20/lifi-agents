@@ -175,3 +175,5 @@ Open **http://localhost:3000**
 - **Circle** — Arc / CCTP for native USDC
 - **DeFiLlama** — Yield data
 - **Google Gemini** — Intent parsing
+
+UI inspired from aslan agents done by V0 
