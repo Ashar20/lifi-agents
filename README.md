@@ -1,7 +1,9 @@
 # LI.FI Agents Orchestrator
 
-> Intent-driven cross-chain DeFi. Say what you want—agents and LI.FI handle execution.  
-> **HackMoney 2026 · LI.FI Track**
+> **AI-Powered Cross-Chain DeFi. Speak naturally. Get it done.**  
+> Built for HackMoney 2026 — LI.FI Track
+
+A cross-chain DeFi orchestrator with **7 specialized AI agents** (inspired by Dune characters) that work together to swap, bridge, optimize yields, detect arbitrage, and manage your portfolio across **Ethereum, Arbitrum, Optimism, Polygon, Base, and Avalanche**. Just type what you want—no forms, no jargon.
 
 ---
 
@@ -137,13 +139,41 @@ Paul Atreides (a0) ← USER INTENT
 
 ---
 
+## Circle / Arc CCTP
+
+Native USDC cross-chain transfers use **Arc** (Circle's liquidity hub) and **CCTP** (Cross-Chain Transfer Protocol).
+
+- **Burn–mint mechanism** — USDC is burned on the source chain and minted on the destination. No wrapped or bridged tokens; you receive canonical Circle USDC.
+- **Supported chains** — Ethereum, Arbitrum, Optimism, Polygon, Base, Avalanche.
+- **Integration** — LI.FI routes USDC→USDC through CCTP when optimal; we surface Arc branding in the UI when a route uses it.
+- **Implementation** — `services/arcIntegration.ts` defines CCTP domains, native USDC addresses, and `getArcTransferInfo()` for badges and metadata.
+
+---
+
+## Tech Stack
+
+| Layer | Stack |
+|-------|-------|
+| Frontend | React, Vite, TypeScript |
+| AI | Google Gemini (`@google/genai`) — intent parsing, agent prompts, chat |
+| Routing & Execution | LI.FI SDK v2 (`@lifi/sdk`) |
+| Native USDC | Arc / Circle CCTP |
+| Yield Data | DeFiLlama API |
+| Wallet | Wagmi, Viem |
+| RPC | Direct RPC fallbacks (drpc.org, 1rpc.io, cloudflare-eth.com, ankr) |
+
+---
+
 ## Quick Start
 
 ```bash
 npm install
 ```
 
-Create `.env`:
+- API keys stored in `.env` (never committed)
+- AI runs client-side (Gemini API)
+- No server-side storage of private keys or sensitive data
+- Rate limiting to avoid quota exhaustion
 
 ```env
 VITE_GEMINI_API_KEY=your_gemini_key
@@ -155,17 +185,6 @@ npm run dev
 ```
 
 Open **http://localhost:3000**
-
----
-
-## Tech Stack
-
-| Layer | Stack |
-|-------|-------|
-| Frontend | React, Vite, TypeScript |
-| AI | Gemini |
-| DeFi | LI.FI SDK, Arc (CCTP), DeFiLlama |
-| Wallet | Wagmi, Viem |
 
 ---
 
