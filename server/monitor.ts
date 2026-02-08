@@ -134,7 +134,7 @@ export class BackgroundMonitor {
         throw new Error(`DeFiLlama API error: ${response.status}`);
       }
       
-      const data = await response.json();
+      const data: any = await response.json();
       const pools = data.data || [];
       
       const chainNameToId: Record<string, number> = {
@@ -209,7 +209,7 @@ export class BackgroundMonitor {
             );
             
             if (response.ok) {
-              const data = await response.json();
+              const data: any = await response.json();
               const price = data[token]?.usd || 0;
               if (price > 0) {
                 prices.push({ chain, price });
