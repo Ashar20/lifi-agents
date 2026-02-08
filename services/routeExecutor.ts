@@ -138,7 +138,10 @@ export async function prepareExecution(
         warnings: ['No route available for this swap'],
       };
     }
-    
+
+    // getQuote returns { quote: LifiStep, arcInfo, isArcRoute } — extract the raw step
+    const rawQuote = quote.quote || quote;
+
     // Analyze risk
     const riskAnalysis = await analyzeRouteRisk({
       fromChain: params.fromChain,
@@ -149,12 +152,12 @@ export async function prepareExecution(
       fromAddress: params.fromAddress,
     });
     
-    // Extract quote details
-    const estimate = quote.estimate || {};
+    // Extract quote details from the raw LI.FI step
+    const estimate = rawQuote.estimate || {};
     const estimatedOutput = estimate.toAmount || '0';
     const estimatedOutputUSD = parseFloat(estimate.toAmountUSD || '0');
     const fromAmountUSD = parseFloat(estimate.fromAmountUSD || '0');
-    
+
     // Calculate gas costs
     let gasCostUSD = 0;
     if (estimate.gasCosts && Array.isArray(estimate.gasCosts)) {
@@ -162,14 +165,14 @@ export async function prepareExecution(
         return sum + parseFloat(gas.amountUSD || '0');
       }, 0);
     }
-    
+
     const totalCostUSD = fromAmountUSD + gasCostUSD;
     const netValueUSD = estimatedOutputUSD - gasCostUSD;
-    
+
     // Parse steps
     const steps: ExecutionStep[] = [];
-    if (quote.includedSteps) {
-      quote.includedSteps.forEach((step: any, index: number) => {
+    if (rawQuote.includedSteps) {
+      rawQuote.includedSteps.forEach((step: any, index: number) => {
         steps.push({
           stepNumber: index + 1,
           type: step.type === 'cross' ? 'bridge' : 'swap',
@@ -197,7 +200,7 @@ export async function prepareExecution(
     const readyToExecute = riskAnalysis.isValid && warnings.length < 3;
     
     return {
-      quote,
+      quote: rawQuote,
       riskAnalysis,
       estimatedOutput,
       estimatedOutputUSD,

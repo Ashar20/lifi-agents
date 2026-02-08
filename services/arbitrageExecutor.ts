@@ -452,11 +452,11 @@ export async function executeArbitrage(
     
     result.success = true;
     
-    // Update transaction as completed
+    // Update transaction as completed (tx is on source chain where user signed)
     transactionHistory.updateTransaction(tx.id, {
       status: 'completed',
       txHash: finalTxHash,
-      explorerUrl: finalTxHash ? getExplorerUrl(plan.opportunity.toChain, finalTxHash) : undefined,
+      explorerUrl: finalTxHash ? getExplorerUrl(plan.opportunity.fromChain, finalTxHash) : undefined,
       profitUsd: result.actualProfit || plan.netProfit,
     });
     

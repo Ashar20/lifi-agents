@@ -916,10 +916,12 @@ const App: React.FC = () => {
 
           const { lifiService } = await import('./services/lifi');
           const { executeAaveWithdraw } = await import('./services/directAaveWithdraw');
+          const { canUseArcRoute, getArcTransferInfo, formatArcLog, arcStats } = await import('./services/arcIntegration');
           const CHAIN_NAMES_EXEC: Record<number, string> = { 1: 'Ethereum', 42161: 'Arbitrum', 10: 'Optimism', 137: 'Polygon', 8453: 'Base' };
           const USDC_ADDRESSES: Record<number, string> = { 1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 42161: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 10: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', 137: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', 8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' };
 
-          const executedActions: Array<{ action: string; token: string; amount: number; status: string; txHash?: string; error?: string; fromChain?: string; toChain?: string }> = [];
+          const executedActions: Array<{ action: string; token: string; amount: number; status: string; txHash?: string; error?: string; fromChain?: string; toChain?: string; isArcRoute?: boolean }> = [];
+          let hasArcRoute = false;
 
           // Check if user has Aave deposits — check analysis text from Irulan or aToken balance
           const irulanResult = context?.previousResults?.['a2'];
@@ -995,16 +997,27 @@ const App: React.FC = () => {
                 continue;
               }
 
+              // Check for Arc/CCTP route — getQuote returns { quote: LifiStep, arcInfo, isArcRoute }
+              const isArc = (quote as any).isArcRoute || false;
+              const rawQuote = (quote as any).quote || quote; // Extract raw LI.FI step for execution
+              if (isArc) {
+                hasArcRoute = true;
+                addLog(agent.name, `   ⚡ Arc/CCTP route detected! Native USDC burn & mint (${fromChainName} → ${toChainName})`);
+              }
+
               // Step 5: Execute
               if (walletClient) {
-                addLog(agent.name, `   ✍️ Executing ${isCrossChain ? 'bridge + swap' : 'swap'}...`);
-                const execResult = await lifiService.executeRoute(quote, walletClient);
+                addLog(agent.name, `   ✍️ Executing ${isArc ? 'Arc/CCTP transfer' : isCrossChain ? 'bridge + swap' : 'swap'}...`);
+                const execResult = await lifiService.executeRoute(rawQuote, walletClient);
                 const txHash = execResult?.transactionHash || execResult?.hash || execResult?.steps?.[0]?.execution?.process?.[0]?.txHash;
-                addLog(agent.name, `   ✅ ${action.type === 'sell' ? 'Sold' : 'Bought'} ~$${amountUSD.toFixed(2)} of ${tokenSymbol}${isCrossChain ? ` (${fromChainName} → ${toChainName})` : ''}. TX: ${txHash?.slice(0, 10) || 'pending'}...`);
-                executedActions.push({ action: action.type, token: tokenSymbol, amount: amountUSD, status: 'executed', txHash, fromChain: fromChainName, toChain: toChainName });
+                addLog(agent.name, `   ✅ ${action.type === 'sell' ? 'Sold' : 'Bought'} ~$${amountUSD.toFixed(2)} of ${tokenSymbol}${isCrossChain ? ` (${fromChainName} → ${toChainName})` : ''}${isArc ? ' via Arc/CCTP' : ''}. TX: ${txHash?.slice(0, 10) || 'pending'}...`);
+                if (isArc) {
+                  arcStats.recordTransfer(fromChainName, toChainName, amountUSD);
+                }
+                executedActions.push({ action: action.type, token: tokenSymbol, amount: amountUSD, status: 'executed', txHash, fromChain: fromChainName, toChain: toChainName, isArcRoute: isArc });
               } else {
                 addLog(agent.name, `   📋 Quote ready — connect wallet to execute`);
-                executedActions.push({ action: action.type, token: tokenSymbol, amount: amountUSD, status: 'quoted', fromChain: fromChainName, toChain: toChainName });
+                executedActions.push({ action: action.type, token: tokenSymbol, amount: amountUSD, status: 'quoted', fromChain: fromChainName, toChain: toChainName, isArcRoute: isArc });
               }
             } catch (actionErr: any) {
               addLog(agent.name, `   ❌ Failed: ${actionErr.message?.slice(0, 120)}`);
@@ -1025,6 +1038,8 @@ const App: React.FC = () => {
             failed,
             skipped,
             crossChain: true,
+            arcPowered: hasArcRoute,
+            arcStats: hasArcRoute ? arcStats.getStats() : undefined,
           };
           taskType = 'rebalancing';
           summary = executed > 0
@@ -1692,8 +1707,16 @@ const App: React.FC = () => {
           } else if (!isVaultDeposit && walletClient && executionPlan.readyToExecute && executionPlan.quote) {
           // AUTO-EXECUTE for non-vault (bridge only) - same as before
             addLog(agent.name, '🔐 Wallet detected! Initiating auto-execution...');
+
+            // Check for Arc/CCTP route — USDC cross-chain transfers use CCTP
+            const { isArcSupported, arcStats: arcStatsTracker } = await import('./services/arcIntegration');
+            const isArcExecRoute = sourceBalance && sourceBalance.tokenSymbol === 'USDC' && sourceBalance.chainId !== toChain && isArcSupported(sourceBalance.chainId) && isArcSupported(toChain);
+            if (isArcExecRoute) {
+              addLog(agent.name, `⚡ Arc/CCTP route detected! Native USDC burn & mint (${sourceBalance.chainName} → ${toChainName})`);
+            }
+
             await new Promise(r => setTimeout(r, 300));
-            addLog(agent.name, '📤 Sending transaction to wallet for signature...');
+            addLog(agent.name, `📤 Sending ${isArcExecRoute ? 'Arc/CCTP' : ''} transaction to wallet for signature...`);
 
             // Import transaction history service
             const { transactionHistory: txHistoryService } = await import('./services/transactionHistory');
@@ -1722,11 +1745,14 @@ const App: React.FC = () => {
 
               const txHash = execResult.transactionHash || execResult.hash || 'pending';
               addLog(agent.name, '✍️ Transaction signed!');
-              addLog(agent.name, `📡 Broadcasting to network...`);
+              addLog(agent.name, `📡 Broadcasting to network${isArcExecRoute ? ' via Arc/CCTP' : ''}...`);
               await new Promise(r => setTimeout(r, 200));
-              addLog(agent.name, `✅ Transaction submitted!`);
+              addLog(agent.name, `✅ Transaction submitted!${isArcExecRoute ? ' (Arc/CCTP - native USDC burn & mint)' : ''}`);
               addLog(agent.name, `🔗 TX Hash: ${txHash}`);
-              toast.success(`Transaction submitted! Hash: ${txHash.slice(0, 10)}...`);
+              if (isArcExecRoute) {
+                arcStatsTracker.recordTransfer(sourceBalance.chainName, toChainName, amountToUse);
+              }
+              toast.success(`${isArcExecRoute ? '⚡ Arc: ' : ''}Transaction submitted! Hash: ${txHash.slice(0, 10)}...`);
 
               // Explorer URLs per chain
               const EXPLORER_URLS: Record<number, string> = {
@@ -1737,13 +1763,13 @@ const App: React.FC = () => {
                 8453: 'https://basescan.org/tx/',
               };
 
-              // Update transaction in history
+              // Update transaction in history (tx is on source chain where user signed)
               txHistoryService.updateTransaction(pendingTx.id, {
                 status: 'completed',
                 txHash,
                 toAmount: executionPlan.estimatedOutputUSD.toFixed(2),
                 toAmountUsd: executionPlan.estimatedOutputUSD,
-                explorerUrl: `${EXPLORER_URLS[toChain] || 'https://etherscan.io/tx/'}${txHash}`,
+                explorerUrl: `${EXPLORER_URLS[sourceBalance.chainId] || 'https://etherscan.io/tx/'}${txHash}`,
               });
 
               // Add success message to chat
@@ -1769,10 +1795,11 @@ const App: React.FC = () => {
                 warnings: [],
                 readyToExecute: true,
                 walletConnected: true,
-                note: `✅ Transaction executed! Hash: ${txHash}`
+                note: `✅ Transaction executed! Hash: ${txHash}`,
+                arcPowered: isArcExecRoute,
               };
               taskType = executionTaskType;
-              summary = `✅ EXECUTED! ${amountToUse.toFixed(4)} ${sourceBalance.tokenSymbol} bridged ${sourceBalance.chainName} → ${toChainName}. TX: ${txHash.slice(0, 10)}...`;
+              summary = `✅ EXECUTED! ${amountToUse.toFixed(4)} ${sourceBalance.tokenSymbol} ${isArcExecRoute ? 'transferred via Arc/CCTP' : 'bridged'} ${sourceBalance.chainName} → ${toChainName}. TX: ${txHash.slice(0, 10)}...`;
 
             } catch (execError: any) {
               console.error('Auto-execution error:', execError);
@@ -1803,7 +1830,7 @@ const App: React.FC = () => {
                       txHash: errTxHash,
                       toAmount: executionPlan.estimatedOutputUSD.toFixed(2),
                       toAmountUsd: executionPlan.estimatedOutputUSD,
-                      explorerUrl: `${EXPLORER_URLS[toChain] || 'https://etherscan.io/tx/'}${errTxHash}`,
+                      explorerUrl: `${EXPLORER_URLS[sourceBalance.chainId] || 'https://etherscan.io/tx/'}${errTxHash}`,
                     });
                     result = {
                       type: 'cross_chain_swap',

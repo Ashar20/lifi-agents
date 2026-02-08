@@ -3,6 +3,7 @@ import { AgentTaskResult, AgentMetadata, LogMessage } from '../types';
 import { Shield, Search, Target, Zap, Clock, CheckCircle, XCircle, AlertCircle, DollarSign, Activity, Server, ChevronDown, ChevronUp, Users, TrendingUp, Radio, Brain, Database, Bell, ArrowLeft, BarChart3, ListChecks, Terminal } from 'lucide-react';
 import { AGENT_ABILITIES } from '../constants';
 import LottieAvatar from './LottieAvatar';
+import { ArcBadge, ArcRouteIndicator, ArcStatsDisplay } from './ArcBadge';
 
 interface OperationsDashboardProps {
   agents: AgentMetadata[];
@@ -557,9 +558,116 @@ export const OperationsDashboard: React.FC<OperationsDashboardProps> = ({
 
                     {isExpanded && result.data && (
                       <div className="border-t border-gray-700 bg-black/30 p-4">
-                        <pre className="text-xs text-gray-300 font-mono overflow-x-auto">
-                          {JSON.stringify(result.data, null, 2)}
-                        </pre>
+                        {/* Rich rendering for rebalancing results */}
+                        {result.data.type === 'rebalancing' && result.data.actions ? (
+                          <div className="space-y-4">
+                            {/* Arc Badge if any action used Arc/CCTP */}
+                            {result.data.arcPowered && (
+                              <div className="flex items-center gap-3">
+                                <ArcBadge
+                                  isArcRoute={true}
+                                  size="md"
+                                  showDetails={true}
+                                  sourceChain={result.data.actions.find((a: any) => a.isArcRoute)?.fromChain}
+                                  destinationChain={result.data.actions.find((a: any) => a.isArcRoute)?.toChain}
+                                  estimatedTime="~15 min"
+                                />
+                              </div>
+                            )}
+
+                            {/* Status header */}
+                            <div className="flex items-center gap-3">
+                              <span className={`text-sm font-bold ${
+                                result.data.status === 'EXECUTED' ? 'text-green-400' :
+                                result.data.status === 'PARTIAL' ? 'text-yellow-400' :
+                                result.data.status === 'FAILED' ? 'text-red-400' : 'text-blue-400'
+                              }`}>
+                                {result.data.status}
+                              </span>
+                              {result.data.drift && (
+                                <span className="text-xs text-gray-400">Drift: {result.data.drift}</span>
+                              )}
+                              {result.data.crossChain && (
+                                <span className="px-2 py-0.5 bg-purple-500/20 border border-purple-500/30 rounded text-purple-300 text-xs">Cross-Chain</span>
+                              )}
+                            </div>
+
+                            {/* Actions list */}
+                            <div className="space-y-2">
+                              {result.data.actions.map((action: any, i: number) => (
+                                <div key={i} className="flex items-center justify-between bg-gray-800/50 rounded-lg p-3">
+                                  <div className="flex items-center gap-3">
+                                    <span className={`text-lg ${action.action === 'sell' ? 'text-red-400' : 'text-green-400'}`}>
+                                      {action.action === 'sell' ? '\u{1F4C9}' : '\u{1F4C8}'}
+                                    </span>
+                                    <div>
+                                      <span className="text-white text-sm font-medium">
+                                        {action.action.toUpperCase()} ${action.amount?.toFixed(2)} {action.token}
+                                      </span>
+                                      {action.fromChain && action.toChain && action.fromChain !== action.toChain && (
+                                        <div className="text-xs text-gray-400">
+                                          {action.fromChain} → {action.toChain}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <ArcRouteIndicator isArcRoute={action.isArcRoute || false} />
+                                    <span className={`px-2 py-0.5 rounded text-xs font-mono ${
+                                      action.status === 'executed' ? 'bg-green-500/20 text-green-300' :
+                                      action.status === 'failed' ? 'bg-red-500/20 text-red-300' :
+                                      action.status === 'quoted' ? 'bg-blue-500/20 text-blue-300' :
+                                      'bg-gray-500/20 text-gray-300'
+                                    }`}>
+                                      {action.status}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Arc stats if available */}
+                            {result.data.arcStats && (
+                              <ArcStatsDisplay stats={result.data.arcStats} />
+                            )}
+                          </div>
+                        ) : result.data.type === 'cross_chain_swap' && result.data.arcPowered ? (
+                          <div className="space-y-4">
+                            <ArcBadge
+                              isArcRoute={true}
+                              size="md"
+                              showDetails={true}
+                              sourceChain={result.data.route?.split('→')?.[0]?.trim()}
+                              destinationChain={result.data.route?.split('→')?.[1]?.trim()}
+                              estimatedTime={result.data.estimatedTime}
+                            />
+                            <div className="flex items-center gap-3">
+                              <span className={`text-sm font-bold ${result.data.status === 'EXECUTED' ? 'text-green-400' : 'text-blue-400'}`}>
+                                {result.data.status}
+                              </span>
+                              {result.data.transactionHash && (
+                                <span className="text-xs text-gray-400 font-mono">TX: {result.data.transactionHash.slice(0, 14)}...</span>
+                              )}
+                            </div>
+                            {result.data.steps && (
+                              <div className="space-y-1">
+                                {result.data.steps.map((step: string, i: number) => (
+                                  <div key={i} className="flex items-center gap-2 text-xs text-gray-300">
+                                    <ArcRouteIndicator isArcRoute={true} />
+                                    <span>{step}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <pre className="text-xs text-gray-300 font-mono overflow-x-auto mt-2">
+                              {JSON.stringify(result.data, null, 2)}
+                            </pre>
+                          </div>
+                        ) : (
+                          <pre className="text-xs text-gray-300 font-mono overflow-x-auto">
+                            {JSON.stringify(result.data, null, 2)}
+                          </pre>
+                        )}
                       </div>
                     )}
                   </div>

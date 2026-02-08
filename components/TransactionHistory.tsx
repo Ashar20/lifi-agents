@@ -384,7 +384,7 @@ export const TransactionHistory: React.FC<TransactionHistoryProps> = ({ onLog })
 
                     {tx.txHash && (
                       <a
-                        href={tx.explorerUrl || getExplorerUrl(tx.toChainId, tx.txHash)}
+                        href={tx.explorerUrl || getExplorerUrl(tx.fromChainId, tx.txHash)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-neon-green mt-1"

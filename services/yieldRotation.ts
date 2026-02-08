@@ -700,11 +700,11 @@ export async function executeYieldRotation(
     
     const txHash = execution.steps?.[0]?.execution?.txHash;
     
-    // Update transaction as completed
+    // Update transaction as completed (tx is on source chain where user signed)
     transactionHistory.updateTransaction(tx.id, {
       status: 'completed',
       txHash,
-      explorerUrl: txHash ? getExplorerUrl(plan.toOpportunity.chainId, txHash) : undefined,
+      explorerUrl: txHash ? getExplorerUrl(plan.fromPosition.chainId, txHash) : undefined,
       profitUsd: plan.estimatedAnnualGain / 12, // Rough monthly estimate
     });
     
