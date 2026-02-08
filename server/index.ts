@@ -12,7 +12,7 @@ const app = express();
 const httpServer = createServer(app);
 const io = new SocketServer(httpServer, {
   cors: {
-    origin: ['http://localhost:3000', 'http://localhost:5173'],
+    origin: ['http://localhost:3000', 'http://localhost:5173', 'https://lifi-agents.vercel.app/'],
     methods: ['GET', 'POST'],
   },
 });
@@ -144,7 +144,7 @@ io.on('connection', (socket) => {
 // Start server
 const PORT = process.env.PORT || 3001;
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT,"0.0.0.0", () => {
   console.log('');
   console.log('╔════════════════════════════════════════════════════════╗');
   console.log('║     🤖 LI.FI AGENTS BACKGROUND MONITOR                 ║');
