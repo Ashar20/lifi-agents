@@ -3,7 +3,7 @@
 // SDK v2: executeRoute(signer, route, settings) - https://docs.li.fi/sdk/execute-routes
 
 import { convertQuoteToRoute } from '@lifi/sdk';
-import { BrowserProvider } from 'ethers';
+import { Web3Provider } from '@ethersproject/providers';
 import { createPublicClient, http, formatUnits, parseUnits, Address, erc20Abi } from 'viem';
 import { mainnet, arbitrum, optimism, polygon, base, sepolia, arbitrumSepolia, optimismSepolia, baseSepolia } from 'viem/chains';
 import { ArbitrageOpportunity, detectArbitrageOpportunities } from './priceFetcher';
@@ -385,8 +385,8 @@ export async function executeArbitrage(
     if (!ethereum) {
       throw new Error('No wallet found. Please connect MetaMask or another Web3 wallet.');
     }
-    const provider = new BrowserProvider(ethereum);
-    let signer = await provider.getSigner();
+    const provider = new Web3Provider(ethereum);
+    let signer = provider.getSigner();
     
     // Convert quote (LifiStep) to Route - SDK v2 getQuote returns LifiStep
     const route = convertQuoteToRoute(plan.route);
@@ -421,8 +421,8 @@ export async function executeArbitrage(
           method: 'wallet_switchEthereumChain',
           params: [{ chainId: '0x' + chainId.toString(16) }],
         });
-        const newProvider = new BrowserProvider(ethereum);
-        signer = await newProvider.getSigner();
+        const newProvider = new Web3Provider(ethereum);
+        signer = newProvider.getSigner();
         return signer as any;
       },
       acceptExchangeRateUpdateHook: async () => true,

@@ -51,12 +51,11 @@ export interface RebalanceResult {
 // Default rebalance config
 const DEFAULT_CONFIG: RebalanceConfig = {
   targetAllocations: [
-    { token: 'USDC', percentage: 40 },
-    { token: 'ETH', percentage: 40 },
-    { token: 'WETH', percentage: 20 },
+    { token: 'ETH', percentage: 60 },
+    { token: 'USDC', percentage: 40, preferredChains: [42161] },
   ],
   rebalanceThreshold: 5, // 5% drift triggers rebalance
-  minTradeValueUSD: 10, // Don't trade less than $10
+  minTradeValueUSD: 3, // Skip trades below $3 (gas costs would dominate)
   maxSlippagePercent: 1,
   dryRun: true,
 };
@@ -134,8 +133,8 @@ export function calculateRebalanceActions(
   const actions: RebalanceAction[] = [];
   const { totalValueUSD, allocations, positions } = state;
 
-  if (totalValueUSD < config.minTradeValueUSD) {
-    console.log('[Rebalance] Portfolio too small to rebalance');
+  if (totalValueUSD <= 0) {
+    console.log('[Rebalance] No portfolio value to rebalance');
     return actions;
   }
 
@@ -167,7 +166,7 @@ export function calculateRebalanceActions(
 
     const diffUSD = currentValueUSD - targetValueUSD;
 
-    if (diffUSD > config.minTradeValueUSD) {
+    if (diffUSD > 0) {
       // Over-allocated - need to sell
       // Find the position with the most value to sell from
       const tokenPositions = positions.filter(p =>
@@ -179,19 +178,30 @@ export function calculateRebalanceActions(
         const largestPosition = tokenPositions.sort((a, b) => b.valueUSD - a.valueUSD)[0];
         const amountToken = diffUSD / largestPosition.priceUSD;
 
+        // For native ETH, use LI.FI's native token address (0x0000...); for WETH use WETH address
+        // Portfolio tracker returns 0xEeee... for native tokens, but LI.FI SDK v2 expects 0x0000...
+        const isNativeToken = token === 'ETH' && (
+          !largestPosition.tokenAddress ||
+          largestPosition.tokenAddress === '0x0000000000000000000000000000000000000000' ||
+          largestPosition.tokenAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+        );
+        const fromTokenAddr = isNativeToken
+          ? NATIVE_TOKEN_ADDRESS
+          : (largestPosition.tokenAddress || TOKEN_ADDRESSES[token]?.[largestPosition.chainId] || NATIVE_TOKEN_ADDRESS);
+
         sellActions.push({
           type: 'sell',
           token,
           fromChain: largestPosition.chainId,
-          toChain: largestPosition.chainId, // Same chain initially
+          toChain: largestPosition.chainId, // Same chain initially, may be updated by sell→buy matching
           amountUSD: diffUSD,
           amountToken,
-          fromToken: largestPosition.tokenAddress,
+          fromToken: fromTokenAddr,
           toToken: TOKEN_ADDRESSES['USDC']?.[largestPosition.chainId] || '',
           reason: `Reduce ${token} allocation from ${currentPercentage.toFixed(1)}% to ${target.percentage}%`,
         });
       }
-    } else if (diffUSD < -config.minTradeValueUSD) {
+    } else if (diffUSD < 0) {
       // Under-allocated - need to buy
       const buyAmountUSD = Math.abs(diffUSD);
       const preferredChain = target.preferredChains?.[0] || 42161; // Default to Arbitrum
@@ -202,7 +212,7 @@ export function calculateRebalanceActions(
         fromChain: preferredChain,
         toChain: preferredChain,
         amountUSD: buyAmountUSD,
-        amountToken: 0, // Will be calculated from quote
+        amountToken: buyAmountUSD, // fromToken is USDC (~$1), so token amount ≈ USD amount
         fromToken: TOKEN_ADDRESSES['USDC']?.[preferredChain] || '',
         toToken: token === 'ETH' ? NATIVE_TOKEN_ADDRESS : (TOKEN_ADDRESSES[token]?.[preferredChain] || ''),
         reason: `Increase ${token} allocation from ${currentPercentage.toFixed(1)}% to ${target.percentage}%`,
@@ -233,7 +243,7 @@ export function calculateRebalanceActions(
 
   // Add remaining buys (need to source from USDC)
   for (const buy of buyActions) {
-    if (buy.amountUSD >= config.minTradeValueUSD) {
+    if (buy.amountUSD > 0) {
       actions.push(buy);
     }
   }

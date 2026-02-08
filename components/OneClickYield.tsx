@@ -164,7 +164,8 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
       const result = await findBestRotation(
         address as Address,
         minApyImprovement,
-        isTestnet
+        isTestnet,
+        (msg) => setStatusMessage(msg)
       );
       
       setPositions(result.positions);
@@ -177,7 +178,7 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
         setViewMode('error');
         onLog?.('⚠️ No tokens found in wallet', 'error');
       } else if (!result.bestPlan) {
-        setStatusMessage(`Found ${result.positions.length} positions, but no opportunities with >${minApyImprovement}% APY improvement.`);
+        setStatusMessage(`Found ${result.positions.length} position(s), but no executable opportunities (${minApyImprovement}%+ APY improvement).`);
         setViewMode('overview');
         onLog?.(`Found ${result.positions.length} positions`, 'info');
       } else {

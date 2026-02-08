@@ -20,7 +20,7 @@
     "buffer": "^6.0.3",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
-    "ethers": "^6.0.0",
+    "ethers": "^5.7.2",
     "framer-motion": "^12.33.0",
     "lottie-react": "^2.4.1",
     "lucide-react": "^0.554.0",

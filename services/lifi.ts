@@ -4,8 +4,7 @@
 // Docs: https://docs.li.fi/sdk/overview
 
 import { LiFi, Route, Chain, Token, convertQuoteToRoute } from '@lifi/sdk';
-import { createWalletClient, custom } from 'viem';
-import { arbitrum, mainnet, optimism, polygon, base, avalanche } from 'viem/chains';
+import { Web3Provider } from '@ethersproject/providers';
 import type { LifiStep, TokenAmount } from '@lifi/types';
 import { LIFI_INTEGRATOR } from '../constants';
 import {
@@ -689,7 +688,7 @@ export const lifiService = {
   // Execute a cross-chain route
   // SDK v2: executeRoute(signer, route, settings) - signer first, then route
   // Quote (LifiStep) is converted to Route via convertQuoteToRoute before execution
-  // Note: Converts viem WalletClient to ethers-compatible signer for LI.FI SDK
+  // Uses ethers BrowserProvider+getSigner() for proper signer with full provider (fixes "invalid signer or provider")
   async executeRoute(quoteOrRoute: LifiStep | Route, walletClient: any, settings?: { updateRouteHook?: (route: Route) => void }): Promise<any> {
     try {
       // Convert quote to route if needed
@@ -697,40 +696,32 @@ export const lifiService = {
         ? (quoteOrRoute as Route)
         : convertQuoteToRoute(quoteOrRoute as LifiStep);
 
-      // Create ethers-compatible signer adapter from viem WalletClient
-      // LI.FI SDK expects ethers-style signer with getAddress(), signMessage(), sendTransaction()
-      // Cast to 'any' to bypass strict type checking - we implement only the methods LI.FI actually uses
-      const signer = createViemToEthersSigner(walletClient) as any;
-
-      // Get provider for chain switching - required when route starts on a different chain than wallet
       const ethereum = typeof window !== 'undefined' ? (window as any).ethereum : undefined;
+      if (!ethereum) {
+        throw new Error('No wallet found. Please connect MetaMask or another Web3 wallet.');
+      }
 
-      const viemChains = [arbitrum, mainnet, optimism, polygon, base, avalanche];
+      // Use ethers v5 Web3Provider - LI.FI SDK uses ethers v5 internally, needs compatible signer
+      const provider = new Web3Provider(ethereum);
+      let signer = provider.getSigner();
+
       const execSettings = {
         ...settings,
-        switchChainHook: ethereum
-          ? async (requiredChainId: number) => {
-              console.log('[LI.FI] Switching chain to', requiredChainId);
-              await ethereum.request({
-                method: 'wallet_switchEthereumChain',
-                params: [{ chainId: '0x' + requiredChainId.toString(16) }],
-              });
-              // Re-create a viem walletClient on the new chain, then wrap it
-              // with the same ethers v5-compatible adapter the SDK expects
-              const targetChain = viemChains.find(c => c.id === requiredChainId);
-              const newWalletClient = createWalletClient({
-                account: walletClient.account,
-                chain: targetChain,
-                transport: custom(ethereum),
-              });
-              return createViemToEthersSigner(newWalletClient) as any;
-            }
-          : undefined,
+        switchChainHook: async (requiredChainId: number) => {
+          console.log('[LI.FI] Switching chain to', requiredChainId);
+          await ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: '0x' + requiredChainId.toString(16) }],
+          });
+          const newProvider = new Web3Provider(ethereum);
+          signer = newProvider.getSigner();
+          return signer;
+        },
         acceptExchangeRateUpdateHook: async () => true,
       };
 
-      console.log('[LI.FI] Executing route with adapted signer...');
-      const result = await lifi.executeRoute(signer, route, execSettings);
+      console.log('[LI.FI] Executing route with ethers signer...');
+      const result = await lifi.executeRoute(signer as any, route, execSettings);
       return result;
     } catch (error) {
       console.error('Error executing route:', error);

@@ -48,8 +48,7 @@ async function fetchDefiLlamaYields(): Promise<YieldOpportunity[]> {
         return (
           supportedChains.includes(chain) &&
           supportedTokens.some(token => symbol.toUpperCase().includes(token)) &&
-          apy > 0.1 && // Filter out near-zero APYs
-          apy <= 100 && // Filter bloated/inflationary APYs (>100% is usually unsustainable)
+          apy > 0.1 && // Filter out near-zero APYs; include bloated APYs for visibility
           pool.tvlUsd > 100000 // Filter out small pools - use all protocols
         );
       })

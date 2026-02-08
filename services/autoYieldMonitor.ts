@@ -237,7 +237,8 @@ class AutoYieldMonitor {
       const result = await findBestRotation(
         this.config.walletAddress,
         this.config.minApyImprovement,
-        this.config.isTestnet
+        this.config.isTestnet,
+        (msg) => this.log(msg, 'info')
       );
 
       this.updateState({

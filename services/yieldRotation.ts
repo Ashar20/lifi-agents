@@ -3,7 +3,7 @@
 // SDK v2: executeRoute(signer, route, settings) - https://docs.li.fi/sdk/execute-routes
 
 import { ChainId, convertQuoteToRoute } from '@lifi/sdk';
-import { BrowserProvider } from 'ethers';
+import { Web3Provider } from '@ethersproject/providers';
 import { createPublicClient, http, formatUnits, parseUnits, Address, erc20Abi } from 'viem';
 import { mainnet, arbitrum, optimism, polygon, base, avalanche, sepolia, arbitrumSepolia, optimismSepolia, baseSepolia } from 'viem/chains';
 import { transactionHistory, getExplorerUrl } from './transactionHistory';
@@ -497,7 +497,7 @@ export async function fetchYieldOpportunities(
       // Basic filters
       if (!supportedChainNames.includes(chain)) return false;
       if (!supportedTokens.some(t => symbol.includes(t))) return false;
-      if (apy < 0.5 || apy > 100) return false; // Filter out < 0.5% and bloated yields (>100% usually unsustainable)
+      if (apy < 0.5) return false; // Filter out < 0.5%; include bloated yields for visibility
       if (tvl < 300000) return false; // Min $300k TVL to include more protocols
 
       return true;
@@ -545,6 +545,8 @@ export async function calculateRotationPlan(
   walletAddress: Address
 ): Promise<RotationPlan | null> {
   try {
+    const isCrossChain = position.chainId !== targetOpportunity.chainId;
+
     // Get LI.FI quote for the transfer
     const tokenAddresses = position.chainId > 100000 ? TESTNET_TOKENS : MAINNET_TOKENS;
     const targetTokens = tokenAddresses[targetOpportunity.chainId];
@@ -567,7 +569,7 @@ export async function calculateRotationPlan(
     let gasCostUsd = 0;
     
     // Only get route if cross-chain transfer is needed
-    if (position.chainId !== targetOpportunity.chainId) {
+    if (isCrossChain) {
       try {
         // Use lifiService (Arc/CCTP for USDC routes) instead of direct lifi.getQuote
         const quote = await lifiService.getQuote({
@@ -654,18 +656,10 @@ export async function executeYieldRotation(
     onStatusUpdate?.('Preparing transaction...');
     
     if (!plan.route) {
-      // Same chain operation - NOT supported yet; requires protocol-specific deposit integration
-      // Do NOT fake success - user must sign with wallet for any real execution
-      const errMsg = 'Same-chain rotation not supported yet. We only execute via LI.FI for cross-chain moves. Use the Intent Chat to "make best use of X USDC from Ethereum" for cross-chain routes, or bridge funds to another chain first.';
+      const errMsg = 'Same-chain rotation not supported. Use cross-chain moves via LI.FI.';
       onStatusUpdate?.(errMsg);
-      transactionHistory.updateTransaction(tx.id, {
-        status: 'failed',
-        error: errMsg,
-      });
-      return {
-        success: false,
-        error: errMsg,
-      };
+      transactionHistory.updateTransaction(tx.id, { status: 'failed', error: errMsg });
+      return { success: false, error: errMsg };
     }
     
     onStatusUpdate?.('Requesting wallet signature...');
@@ -676,8 +670,8 @@ export async function executeYieldRotation(
     if (!ethereum) {
       throw new Error('No wallet found. Please connect MetaMask or another Web3 wallet.');
     }
-    const provider = new BrowserProvider(ethereum);
-    let signer = await provider.getSigner();
+    const provider = new Web3Provider(ethereum);
+    let signer = provider.getSigner();
     
     // Convert quote (LifiStep) to Route
     const route = convertQuoteToRoute(plan.route);
@@ -695,8 +689,8 @@ export async function executeYieldRotation(
           method: 'wallet_switchEthereumChain',
           params: [{ chainId: '0x' + chainId.toString(16) }],
         });
-        const newProvider = new BrowserProvider(ethereum);
-        signer = await newProvider.getSigner();
+        const newProvider = new Web3Provider(ethereum);
+        signer = newProvider.getSigner();
         return signer as any;
       },
       acceptExchangeRateUpdateHook: async () => true,
@@ -739,7 +733,8 @@ export async function executeYieldRotation(
 export async function findBestRotation(
   walletAddress: Address,
   minApyImprovement: number = 2,
-  isTestnet: boolean = false
+  isTestnet: boolean = false,
+  onProgress?: (message: string) => void
 ): Promise<{
   positions: Position[];
   opportunities: YieldOpportunity[];
@@ -747,6 +742,7 @@ export async function findBestRotation(
   allPlans: RotationPlan[];
 }> {
   console.log(`[Yield] 🚀 Finding best yield rotation for wallet ${walletAddress.slice(0, 8)}...`);
+  onProgress?.('Scanning wallet positions across chains...');
 
   // Get wallet positions
   const positions = await getWalletPositions(walletAddress, isTestnet);
@@ -767,6 +763,7 @@ export async function findBestRotation(
   }
 
   // Get yield opportunities (mainnet only for now - DeFiLlama doesn't track testnet)
+  onProgress?.('Fetching yield opportunities from DeFiLlama...');
   console.log('[Yield] 🔍 Fetching yield opportunities from DeFiLlama...');
   const opportunities = await fetchYieldOpportunities();
 
@@ -777,9 +774,13 @@ export async function findBestRotation(
 
   // Calculate rotation plans for each position
   const allPlans: RotationPlan[] = [];
+  let planIdx = 0;
 
   for (const position of positions) {
+    onProgress?.(`Checking ${position.chainName} ($${position.valueUsd.toFixed(2)} ${position.token})...`);
     for (const opportunity of opportunities) {
+      planIdx++;
+      if (planIdx % 30 === 0) onProgress?.(`Checking routes... ${planIdx} combinations`);
       // Skip if same chain and same position type
       if (position.chainId === opportunity.chainId &&
           position.token.includes(opportunity.token.split('-')[0])) {
@@ -801,7 +802,7 @@ export async function findBestRotation(
   // Sort by net benefit
   allPlans.sort((a, b) => b.netBenefit - a.netBenefit);
 
-  // Only use executable (cross-chain with LI.FI route) plans - same-chain needs protocol deposits we don't support
+  // Only executable: cross-chain with LI.FI route
   const executablePlans = allPlans.filter(p => p.route !== null);
   const bestPlan = executablePlans.length > 0 ? executablePlans[0] : null;
 
@@ -847,7 +848,8 @@ export async function oneClickYieldRotation(
     const { positions, bestPlan } = await findBestRotation(
       walletAddress,
       minApyImprovement,
-      isTestnet
+      isTestnet,
+      onStatusUpdate
     );
     
     if (positions.length === 0) {

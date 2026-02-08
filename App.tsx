@@ -587,38 +587,52 @@ const App: React.FC = () => {
           summary = `Portfolio tracking failed: ${error.message}`;
         }
       } else if (agent.role === 'Mentat') {
-        // Rebalancer - Real allocation management
+        // Rebalancer - Cross-chain allocation management
         addLog(agent.name, '⚖️ Analyzing portfolio allocations across chains...');
 
         try {
-          const { analyzePortfolioDrift } = await import('./services/rebalancer');
-          const driftAnalysis = await analyzePortfolioDrift(walletAddress);
+          const { executeRebalance, getRebalanceSummary } = await import('./services/rebalancingAgent');
+          const rebalanceResult = await executeRebalance(walletAddress); // dry-run by default
 
+          // Build current/target allocation maps for display
           const currentAlloc: Record<string, number> = {};
           const targetAlloc: Record<string, number> = {};
-          driftAnalysis.allocations.forEach(a => {
-            currentAlloc[a.tokenSymbol] = Math.round(a.currentPercent);
-            targetAlloc[a.tokenSymbol] = a.targetPercent;
+          rebalanceResult.portfolioBefore.allocations.forEach((alloc, token) => {
+            currentAlloc[token] = Math.round(alloc.percentage);
           });
+          // Defaults from config (ETH 60%, USDC 40%)
+          targetAlloc['ETH'] = 60;
+          targetAlloc['USDC'] = 40;
 
+          const totalDrift = Array.from(rebalanceResult.portfolioBefore.allocations.values())
+            .reduce((sum, a) => sum + Math.abs(a.percentage - (targetAlloc[Array.from(rebalanceResult.portfolioBefore.allocations.entries()).find(([_, v]) => v === a)?.[0] || ''] || 0)), 0)
+            / Math.max(rebalanceResult.portfolioBefore.allocations.size, 1);
+
+          const needsRebalancing = rebalanceResult.actions.length > 0;
+          const recommendations = rebalanceResult.actions.map(a =>
+            `${a.type === 'sell' ? 'Sell' : 'Buy'} $${a.amountUSD.toFixed(2)} of ${a.token} (${a.reason})`
+          );
+          if (!needsRebalancing) recommendations.push('Portfolio is well-balanced. No rebalancing needed.');
+
+          const CHAIN_NAMES_LOCAL: Record<number, string> = { 1: 'Ethereum', 42161: 'Arbitrum', 10: 'Optimism', 137: 'Polygon', 8453: 'Base' };
           const analysis = await geminiService.chat({
-            prompt: `You're ${agent.name}. Talk like a human - friendly, clear. Portfolio: $${driftAnalysis.totalValueUSD.toFixed(2)}, drift: ${driftAnalysis.totalDrift.toFixed(1)}%. ${driftAnalysis.recommendations.join('. ')}. Needs rebalancing: ${driftAnalysis.needsRebalancing}. Give a short, conversational recommendation - 1-2 sentences.`
+            prompt: `You're ${agent.name}. Talk like a human - friendly, clear. Portfolio: $${rebalanceResult.portfolioBefore.totalValueUSD.toFixed(2)}, ${rebalanceResult.actions.length} cross-chain rebalance actions needed. ${recommendations.slice(0, 3).join('. ')}. Actions involve chains: ${rebalanceResult.actions.map(a => `${CHAIN_NAMES_LOCAL[a.fromChain] || a.fromChain} → ${CHAIN_NAMES_LOCAL[a.toChain] || a.toChain}`).join(', ')}. Give a short, conversational recommendation - 1-2 sentences.`
           });
 
           result = {
             type: 'rebalancing',
-            drift: `${driftAnalysis.totalDrift.toFixed(1)}%`,
+            drift: `${totalDrift.toFixed(1)}%`,
             current: currentAlloc,
             target: targetAlloc,
-            needsRebalancing: driftAnalysis.needsRebalancing,
-            actions: driftAnalysis.actions,
-            recommendations: driftAnalysis.recommendations,
+            needsRebalancing,
+            actions: rebalanceResult.actions, // cross-chain aware: { type, token, fromChain, toChain, amountUSD, fromToken, toToken, ... }
+            recommendations,
             analysis: analysis.text
           };
           taskType = 'rebalancing';
-          summary = driftAnalysis.needsRebalancing
-            ? `Rebalancing needed: ${driftAnalysis.totalDrift.toFixed(1)}% drift detected. ${driftAnalysis.actions.length} actions recommended.`
-            : `Portfolio balanced: Only ${driftAnalysis.totalDrift.toFixed(1)}% drift. No rebalancing needed.`;
+          summary = needsRebalancing
+            ? `Rebalancing needed: ${rebalanceResult.actions.length} cross-chain actions recommended.`
+            : `Portfolio balanced. No rebalancing needed.`;
         } catch (error: any) {
           console.error('Rebalancing analysis error:', error);
           const analysis = await geminiService.chat({
@@ -897,136 +911,127 @@ const App: React.FC = () => {
           taskType = 'cross_chain_swap';
           summary = 'Skipped: No arbitrage opportunities found.';
         } else if (isRebalancingIntent && thufirResult?.type === 'rebalancing' && thufirResult?.needsRebalancing && thufirResult?.actions?.length > 0) {
-          // Execute rebalancing actions from Thufir Hawat
-          addLog(agent.name, `🔄 Executing rebalancing: ${thufirResult.actions.length} actions needed...`);
+          // Execute cross-chain rebalancing actions from Thufir Hawat
+          addLog(agent.name, `🔄 Executing cross-chain rebalancing: ${thufirResult.actions.length} actions needed...`);
 
           const { lifiService } = await import('./services/lifi');
-          const { prepareExecution } = await import('./services/routeExecutor');
-          const executedActions: Array<{ action: string; token: string; amount: number; status: string; txHash?: string; error?: string }> = [];
+          const { executeAaveWithdraw } = await import('./services/directAaveWithdraw');
+          const CHAIN_NAMES_EXEC: Record<number, string> = { 1: 'Ethereum', 42161: 'Arbitrum', 10: 'Optimism', 137: 'Polygon', 8453: 'Base' };
+          const USDC_ADDRESSES: Record<number, string> = { 1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 42161: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 10: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', 137: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', 8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' };
 
-          const TOKEN_ADDRESSES_REBAL: Record<string, Record<number, string>> = {
-            USDC: { 1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 42161: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 10: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', 137: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', 8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
-            USDT: { 1: '0xdAC17F958D2ee523a2206206994597C13D831ec7', 42161: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', 10: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', 137: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F' },
-            DAI: { 1: '0x6B175474E89094C44Da98b954EedeAC495271d0F', 42161: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', 10: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', 137: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063' },
-            ETH: { 1: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', 42161: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', 10: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', 8453: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' },
-          };
+          const executedActions: Array<{ action: string; token: string; amount: number; status: string; txHash?: string; error?: string; fromChain?: string; toChain?: string }> = [];
 
-          // Determine the wallet's primary chain from Irulan's (a2) data or walletClient
+          // Check if user has Aave deposits — check analysis text from Irulan or aToken balance
           const irulanResult = context?.previousResults?.['a2'];
-          const primaryChainId = walletClient?.chain?.id || 42161;
+          const irulanAnalysis = (irulanResult?.analysis || '').toLowerCase();
+          const hasAaveDeposit = irulanAnalysis.includes('aave') || irulanAnalysis.includes('ausdc') || irulanAnalysis.includes('deposited');
 
           for (const action of thufirResult.actions) {
-            const tokenSymbol = action.tokenSymbol || action.token;
-            const amountUSD = action.amount;
-            addLog(agent.name, `\n${action.type === 'sell' ? '📤' : '📥'} ${action.type.toUpperCase()} ~$${amountUSD.toFixed(2)} of ${tokenSymbol}...`);
+            const tokenSymbol = action.token || action.tokenSymbol;
+            const amountUSD = action.amountUSD || action.amount || 0;
+            const fromChainId = action.fromChain || walletClient?.chain?.id || 42161;
+            const toChainId = action.toChain || fromChainId;
+            const isCrossChain = fromChainId !== toChainId;
+            const fromChainName = CHAIN_NAMES_EXEC[fromChainId] || `Chain ${fromChainId}`;
+            const toChainName = CHAIN_NAMES_EXEC[toChainId] || `Chain ${toChainId}`;
+
+            addLog(agent.name, `\n${action.type === 'sell' ? '📤' : '📥'} ${action.type.toUpperCase()} ~$${amountUSD.toFixed(2)} of ${tokenSymbol} ${isCrossChain ? `(${fromChainName} → ${toChainName})` : `on ${fromChainName}`}`);
 
             try {
-              if (action.type === 'sell') {
-                // Sell = swap this token to USDC (or the target token from buy actions)
-                const fromToken = TOKEN_ADDRESSES_REBAL[tokenSymbol]?.[primaryChainId];
-                const toToken = TOKEN_ADDRESSES_REBAL['USDC']?.[primaryChainId];
-                if (!fromToken || !toToken) {
-                  addLog(agent.name, `   ⚠️ Skipping: ${tokenSymbol} not supported for swap on chain ${primaryChainId}`);
-                  executedActions.push({ action: 'sell', token: tokenSymbol, amount: amountUSD, status: 'skipped', error: 'Token not supported on chain' });
-                  continue;
-                }
-
-                // For sell actions of USDC (overweight), we'll use the amount in buy actions instead
-                // USDC sell is implicit - the buy actions will consume it
-                if (tokenSymbol === 'USDC') {
-                  addLog(agent.name, `   ℹ️ USDC sell will be executed via buy actions (swap USDC → target tokens)`);
-                  executedActions.push({ action: 'sell', token: tokenSymbol, amount: amountUSD, status: 'implicit' });
-                  continue;
-                }
-
-                // Convert USD amount to token amount
-                const tokenBalances = irulanResult?.positionsByToken || {};
-                const tokenValueUSD = tokenBalances[tokenSymbol] || 0;
-                const totalBalance = irulanResult?.positions?.find((p: any) => p.tokenSymbol === tokenSymbol)?.balance || 0;
-                const pricePerToken = totalBalance > 0 ? tokenValueUSD / totalBalance : 0;
-                const tokenAmount = pricePerToken > 0 ? amountUSD / pricePerToken : 0;
-                if (tokenAmount <= 0) {
-                  addLog(agent.name, `   ⚠️ Cannot determine token amount for $${amountUSD.toFixed(2)} of ${tokenSymbol}`);
-                  executedActions.push({ action: 'sell', token: tokenSymbol, amount: amountUSD, status: 'skipped', error: 'Cannot determine amount' });
-                  continue;
-                }
-
-                const decimals = tokenSymbol === 'USDC' || tokenSymbol === 'USDT' || tokenSymbol === 'DAI' ? 6 : 18;
-                const rawAmount = Math.floor(tokenAmount * Math.pow(10, decimals)).toString();
-
-                const quote = await lifiService.getQuote({
-                  fromChain: primaryChainId,
-                  toChain: primaryChainId,
-                  fromToken,
-                  toToken,
-                  fromAmount: rawAmount,
-                  fromAddress: walletAddress,
-                });
-
-                if (walletClient && quote) {
-                  const execResult = await lifiService.executeRoute(quote, walletClient);
-                  const txHash = execResult?.transactionHash || execResult?.hash || execResult?.steps?.[0]?.execution?.process?.[0]?.txHash;
-                  addLog(agent.name, `   ✅ Sold ${tokenAmount.toFixed(4)} ${tokenSymbol}. TX: ${txHash?.slice(0, 10) || 'pending'}...`);
-                  executedActions.push({ action: 'sell', token: tokenSymbol, amount: amountUSD, status: 'executed', txHash });
-                } else {
-                  addLog(agent.name, `   📋 Quote ready for ${tokenAmount.toFixed(4)} ${tokenSymbol} → USDC`);
-                  executedActions.push({ action: 'sell', token: tokenSymbol, amount: amountUSD, status: 'quoted' });
-                }
-              } else if (action.type === 'buy') {
-                // Buy = swap USDC to this token
-                const fromToken = TOKEN_ADDRESSES_REBAL['USDC']?.[primaryChainId];
-                const toToken = TOKEN_ADDRESSES_REBAL[tokenSymbol]?.[primaryChainId];
-                if (!fromToken || !toToken) {
-                  addLog(agent.name, `   ⚠️ Skipping: ${tokenSymbol} not available on chain ${primaryChainId}`);
-                  executedActions.push({ action: 'buy', token: tokenSymbol, amount: amountUSD, status: 'skipped', error: 'Token not available on chain' });
-                  continue;
-                }
-
-                // Convert USD to USDC raw amount (6 decimals)
-                const rawAmount = Math.floor(amountUSD * 1e6).toString();
-
-                const quote = await lifiService.getQuote({
-                  fromChain: primaryChainId,
-                  toChain: primaryChainId,
-                  fromToken,
-                  toToken,
-                  fromAmount: rawAmount,
-                  fromAddress: walletAddress,
-                });
-
-                if (walletClient && quote) {
-                  const execResult = await lifiService.executeRoute(quote, walletClient);
-                  const txHash = execResult?.transactionHash || execResult?.hash || execResult?.steps?.[0]?.execution?.process?.[0]?.txHash;
-                  addLog(agent.name, `   ✅ Bought ~$${amountUSD.toFixed(2)} of ${tokenSymbol}. TX: ${txHash?.slice(0, 10) || 'pending'}...`);
-                  executedActions.push({ action: 'buy', token: tokenSymbol, amount: amountUSD, status: 'executed', txHash });
-                } else {
-                  addLog(agent.name, `   📋 Quote ready for USDC → ${tokenSymbol}`);
-                  executedActions.push({ action: 'buy', token: tokenSymbol, amount: amountUSD, status: 'quoted' });
+              // Step 1: If selling USDC that's in Aave, withdraw first
+              if (action.type === 'sell' && tokenSymbol === 'USDC' && hasAaveDeposit && walletClient) {
+                const usdcAddr = USDC_ADDRESSES[fromChainId];
+                if (usdcAddr) {
+                  addLog(agent.name, `   🏦 Withdrawing USDC from Aave on ${fromChainName} first...`);
+                  const decimals = 6;
+                  const rawAmount = Math.floor(amountUSD * Math.pow(10, decimals)).toString();
+                  const withdrawResult = await executeAaveWithdraw(
+                    { chainId: fromChainId, assetAddress: usdcAddr, amountRaw: rawAmount, toAddress: walletAddress },
+                    walletClient
+                  );
+                  if (withdrawResult.success) {
+                    addLog(agent.name, `   ✅ Withdrew from Aave. TX: ${withdrawResult.txHash?.slice(0, 10)}...`);
+                  } else {
+                    addLog(agent.name, `   ⚠️ Aave withdrawal failed: ${withdrawResult.error}. Trying with liquid balance...`);
+                  }
                 }
               }
+
+              // Step 2: Get token addresses from action (rebalancingAgent provides them)
+              const fromToken = action.fromToken || USDC_ADDRESSES[fromChainId];
+              const toToken = action.toToken || USDC_ADDRESSES[toChainId];
+              if (!fromToken || !toToken) {
+                addLog(agent.name, `   ⚠️ Skipping: missing token address for ${tokenSymbol}`);
+                executedActions.push({ action: action.type, token: tokenSymbol, amount: amountUSD, status: 'skipped', error: 'Missing token address', fromChain: fromChainName, toChain: toChainName });
+                continue;
+              }
+
+              // Step 3: Calculate raw amount
+              const decimals = tokenSymbol === 'USDC' || tokenSymbol === 'USDT' ? 6 : 18;
+              const rawAmount = action.amountToken > 0
+                ? Math.floor(action.amountToken * Math.pow(10, decimals)).toString()
+                : Math.floor(amountUSD * Math.pow(10, decimals)).toString(); // fallback: treat as stablecoin amount
+
+              if (!rawAmount || rawAmount === '0' || Number(rawAmount) <= 0) {
+                addLog(agent.name, `   ⚠️ Invalid amount for ${tokenSymbol}`);
+                executedActions.push({ action: action.type, token: tokenSymbol, amount: amountUSD, status: 'skipped', error: 'Invalid amount', fromChain: fromChainName, toChain: toChainName });
+                continue;
+              }
+
+              // Step 4: Get quote (cross-chain or same-chain)
+              addLog(agent.name, `   📡 Getting ${isCrossChain ? 'cross-chain' : 'same-chain'} quote...`);
+              const quote = await lifiService.getQuote({
+                fromChain: fromChainId,
+                toChain: toChainId,
+                fromToken,
+                toToken,
+                fromAmount: rawAmount,
+                fromAddress: walletAddress,
+              });
+
+              if (!quote) {
+                addLog(agent.name, `   ⚠️ No route found for ${tokenSymbol} ${fromChainName} → ${toChainName}`);
+                executedActions.push({ action: action.type, token: tokenSymbol, amount: amountUSD, status: 'failed', error: 'No route found', fromChain: fromChainName, toChain: toChainName });
+                continue;
+              }
+
+              // Step 5: Execute
+              if (walletClient) {
+                addLog(agent.name, `   ✍️ Executing ${isCrossChain ? 'bridge + swap' : 'swap'}...`);
+                const execResult = await lifiService.executeRoute(quote, walletClient);
+                const txHash = execResult?.transactionHash || execResult?.hash || execResult?.steps?.[0]?.execution?.process?.[0]?.txHash;
+                addLog(agent.name, `   ✅ ${action.type === 'sell' ? 'Sold' : 'Bought'} ~$${amountUSD.toFixed(2)} of ${tokenSymbol}${isCrossChain ? ` (${fromChainName} → ${toChainName})` : ''}. TX: ${txHash?.slice(0, 10) || 'pending'}...`);
+                executedActions.push({ action: action.type, token: tokenSymbol, amount: amountUSD, status: 'executed', txHash, fromChain: fromChainName, toChain: toChainName });
+              } else {
+                addLog(agent.name, `   📋 Quote ready — connect wallet to execute`);
+                executedActions.push({ action: action.type, token: tokenSymbol, amount: amountUSD, status: 'quoted', fromChain: fromChainName, toChain: toChainName });
+              }
             } catch (actionErr: any) {
-              addLog(agent.name, `   ❌ Failed: ${actionErr.message?.slice(0, 100)}`);
-              executedActions.push({ action: action.type, token: tokenSymbol, amount: amountUSD, status: 'failed', error: actionErr.message });
+              addLog(agent.name, `   ❌ Failed: ${actionErr.message?.slice(0, 120)}`);
+              executedActions.push({ action: action.type, token: tokenSymbol, amount: amountUSD, status: 'failed', error: actionErr.message, fromChain: fromChainName, toChain: toChainName });
             }
           }
 
           const executed = executedActions.filter(a => a.status === 'executed').length;
           const failed = executedActions.filter(a => a.status === 'failed').length;
-          const skipped = executedActions.filter(a => a.status === 'skipped' || a.status === 'implicit').length;
+          const skipped = executedActions.filter(a => a.status === 'skipped').length;
 
           result = {
             type: 'rebalancing',
-            status: failed === 0 && executed > 0 ? 'EXECUTED' : executed > 0 ? 'PARTIAL' : 'FAILED',
+            status: failed === 0 && executed > 0 ? 'EXECUTED' : executed > 0 ? 'PARTIAL' : failed > 0 ? 'FAILED' : 'QUOTED',
             drift: thufirResult.drift,
             actions: executedActions,
             executed,
             failed,
             skipped,
+            crossChain: true,
           };
           taskType = 'rebalancing';
           summary = executed > 0
-            ? `✅ Rebalancing: ${executed} actions executed${failed > 0 ? `, ${failed} failed` : ''}. Drift was ${thufirResult.drift}.`
-            : `❌ Rebalancing failed: ${failed} actions failed out of ${thufirResult.actions.length}.`;
+            ? `✅ Cross-chain rebalancing: ${executed} actions executed${failed > 0 ? `, ${failed} failed` : ''}. Drift was ${thufirResult.drift}.`
+            : failed > 0
+            ? `❌ Rebalancing failed: ${failed} actions failed out of ${thufirResult.actions.length}.`
+            : `📋 Rebalancing planned: ${thufirResult.actions.length} actions ready. Connect wallet to execute.`;
           addLog(agent.name, `\n${summary}`);
         } else {
         addLog(agent.name, '🔗 Connecting to LI.FI aggregator...');
