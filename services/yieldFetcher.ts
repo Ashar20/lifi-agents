@@ -15,7 +15,7 @@ export interface YieldOpportunity {
   lastUpdated: number;
 }
 
-// Chain name mappings
+// Chain name mappings — broad coverage for all major chains
 const CHAIN_NAMES: Record<number, string> = {
   1: 'Ethereum',
   42161: 'Arbitrum',
@@ -23,6 +23,19 @@ const CHAIN_NAMES: Record<number, string> = {
   137: 'Polygon',
   8453: 'Base',
   43114: 'Avalanche',
+  56: 'BSC',
+  250: 'Fantom',
+  100: 'Gnosis',
+  42220: 'Celo',
+  1284: 'Moonbeam',
+  59144: 'Linea',
+  534352: 'Scroll',
+  324: 'zkSync Era',
+  5000: 'Mantle',
+  81457: 'Blast',
+  34443: 'Mode',
+  1088: 'Metis',
+  1329: 'Sei',
 };
 
 // Fetch yields from DeFiLlama API (free, no auth required)
@@ -36,20 +49,17 @@ async function fetchDefiLlamaYields(): Promise<YieldOpportunity[]> {
     const data = await response.json();
     const pools = data.data || [];
     
-    // Filter for major stablecoins and ETH on supported chains
-    const supportedChains = ['Ethereum', 'Arbitrum', 'Optimism', 'Polygon', 'Base', 'Avalanche'];
-    const supportedTokens = ['USDC', 'USDT', 'DAI', 'WETH', 'ETH', 'USDC.e', 'USDbC', 'AVAX'];
-    
+    // No chain restrictions — show all chains DeFiLlama tracks
+    const supportedTokens = ['USDC', 'USDT', 'DAI', 'WETH', 'ETH', 'USDC.e', 'USDbC', 'AVAX', 'WBTC', 'MATIC', 'BNB'];
+
     const opportunities: YieldOpportunity[] = pools
       .filter((pool: any) => {
-        const chain = pool.chain || '';
         const symbol = pool.symbol || '';
         const apy = pool.apy || 0;
         return (
-          supportedChains.includes(chain) &&
           supportedTokens.some(token => symbol.toUpperCase().includes(token)) &&
-          apy > 0.1 && // Filter out near-zero APYs; include bloated APYs for visibility
-          pool.tvlUsd > 100000 // Filter out small pools - use all protocols
+          apy > 0.1 && // Include near-zero APYs for visibility
+          pool.tvlUsd > 50000 // Min $50k TVL — show more opportunities
         );
       })
       .map((pool: any) => {
@@ -78,7 +88,7 @@ async function fetchDefiLlamaYields(): Promise<YieldOpportunity[]> {
   }
 }
 
-// Get chain ID from chain name
+// Get chain ID from chain name — broad coverage for all DeFiLlama chains
 function getChainId(chainName: string): number {
   const chainMap: Record<string, number> = {
     'Ethereum': 1,
@@ -87,8 +97,26 @@ function getChainId(chainName: string): number {
     'Polygon': 137,
     'Base': 8453,
     'Avalanche': 43114,
+    'BSC': 56,
+    'Fantom': 250,
+    'Gnosis': 100,
+    'Celo': 42220,
+    'Moonbeam': 1284,
+    'Linea': 59144,
+    'Scroll': 534352,
+    'zkSync Era': 324,
+    'Mantle': 5000,
+    'Blast': 81457,
+    'Mode': 34443,
+    'Metis': 1088,
+    'Sei': 1329,
+    'arbitrum': 42161,
+    'optimism': 10,
+    'polygon': 137,
+    'base': 8453,
+    'avalanche': 43114,
   };
-  return chainMap[chainName] || 1;
+  return chainMap[chainName] ?? chainMap[chainName?.toLowerCase()] ?? 1;
 }
 
 // Extract token symbol from pool symbol (e.g., "USDC-WETH" -> "USDC")

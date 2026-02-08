@@ -13,7 +13,6 @@ import {
   ArrowRight,
   RefreshCw,
   ExternalLink,
-  Settings,
   Info,
   Play,
   Square,
@@ -77,7 +76,6 @@ export const ArbitrageExecutor: React.FC<ArbitrageExecutorProps> = ({ onLog }) =
   const [maxGasCost, setMaxGasCost] = useState(20);
   const [inputToken, setInputToken] = useState('USDC');
   const [checkInterval, setCheckInterval] = useState(30);
-  const [showSettings, setShowSettings] = useState(false);
   
   // Initialize auto-monitor callbacks
   useEffect(() => {
@@ -97,34 +95,76 @@ export const ArbitrageExecutor: React.FC<ArbitrageExecutorProps> = ({ onLog }) =
         }
       }
     );
-    
-    // Load initial state
     setMonitorState(autoArbitrageMonitor.getState());
+  }, [onLog]);
+  
+  // Load config only on mount - don't overwrite user's manual edits
+  useEffect(() => {
     const config = autoArbitrageMonitor.getConfig();
     setMinProfitPercent(config.minProfitPercent);
     setMaxGasCost(config.maxGasCost);
     setInputToken(config.inputToken);
     setCheckInterval(config.checkIntervalMs / 1000);
-  }, [onLog]);
+  }, []);
   
-  // Check balance when chain changes
+  // Persist settings when user changes them (survives tab switch)
+  useEffect(() => {
+    autoArbitrageMonitor.updateConfig({
+      minProfitPercent,
+      maxGasCost,
+      inputToken,
+      checkIntervalMs: checkInterval * 1000,
+    });
+  }, [minProfitPercent, maxGasCost, inputToken, checkInterval]);
+  
+  // Check user balance and set trade amount to wallet balance
+  const checkBalance = useCallback(async () => {
+    if (!address || !chainId) return;
+    
+    try {
+      let balance = { formatted: '0', decimals: 6 };
+      try {
+        balance = await getTokenBalance(address as Address, chainId, inputToken);
+      } catch {
+        // getTokenBalance failed (e.g. unsupported chain)
+      }
+      // If still 0, try portfolio tracker (checks USDC.e, more chains, different RPCs)
+      if (parseFloat(balance.formatted) === 0) {
+        try {
+          const { fetchWalletPortfolio } = await import('../services/portfolioTracker');
+          const positions = await fetchWalletPortfolio(address, [chainId]);
+          const usdcPositions = positions.filter(
+            p => p.tokenSymbol.toUpperCase() === inputToken.toUpperCase() ||
+                 (inputToken === 'USDC' && (p.tokenSymbol === 'USDC' || p.tokenSymbol === 'USDC.e'))
+          );
+          const totalUsdc = usdcPositions.reduce((sum, p) => sum + p.balanceFormatted, 0);
+          if (totalUsdc > 0) {
+            balance = { formatted: totalUsdc.toString(), decimals: 6 };
+          }
+        } catch {
+          // Portfolio tracker failed
+        }
+      }
+      setAvailableBalance(balance.formatted);
+      const bal = parseFloat(balance.formatted);
+      // Use wallet balance as trade amount (user can override)
+      if (bal > 0) {
+        setTradeAmount(balance.formatted);
+      } else {
+        setTradeAmount('0');
+      }
+    } catch (err) {
+      setAvailableBalance('0');
+      setTradeAmount('0');
+    }
+  }, [address, chainId, inputToken]);
+  
+  // Check balance when chain/token changes and sync trade amount to wallet balance
   useEffect(() => {
     if (address && chainId) {
       checkBalance();
     }
-  }, [address, chainId]);
-  
-  // Check user balance
-  const checkBalance = useCallback(async () => {
-    if (!address) return;
-    
-    try {
-      const balance = await getTokenBalance(address as Address, chainId, inputToken);
-      setAvailableBalance(balance.formatted);
-    } catch (err) {
-      setAvailableBalance('0');
-    }
-  }, [address, chainId, inputToken]);
+  }, [address, chainId, inputToken, checkBalance]);
   
   // Start auto-mode
   const handleStartAuto = useCallback(async () => {
@@ -156,14 +196,16 @@ export const ArbitrageExecutor: React.FC<ArbitrageExecutorProps> = ({ onLog }) =
   const handleScan = useCallback(async () => {
     setViewMode('scanning');
     setError(null);
+    setIsLoading(true);
     setStatusMessage('Scanning for cross-chain arbitrage opportunities...');
     onLog?.('🔍 Scanning for arbitrage...', 'info');
     
     try {
+      const amount = parseFloat(tradeAmount) || 100;
       const opps = await scanArbitrageOpportunities(
         inputToken as any,
         minProfitPercent,
-        parseFloat(tradeAmount)
+        amount > 0 ? amount : 100
       );
       
       setOpportunities(opps);
@@ -180,16 +222,22 @@ export const ArbitrageExecutor: React.FC<ArbitrageExecutorProps> = ({ onLog }) =
       setError(err.message || 'Failed to scan');
       setViewMode('error');
       onLog?.(`❌ Scan failed: ${err.message}`, 'error');
+    } finally {
+      setIsLoading(false);
     }
   }, [inputToken, minProfitPercent, tradeAmount, onLog]);
   
   // Select opportunity and create plan
   const handleSelectOpportunity = useCallback(async (opp: ArbitrageOpportunity) => {
-    if (!address) return;
+    if (!address || !walletClient) {
+      onLog?.('Connect wallet to create plan', 'error');
+      return;
+    }
     
     setSelectedOpportunity(opp);
     setViewMode('scanning');
     setStatusMessage('Creating execution plan...');
+    setIsLoading(true);
     
     try {
       // Get the token decimals
@@ -218,12 +266,15 @@ export const ArbitrageExecutor: React.FC<ArbitrageExecutorProps> = ({ onLog }) =
     } catch (err: any) {
       setError(err.message || 'Failed to create plan');
       setViewMode('error');
+      onLog?.(`❌ ${err.message}`, 'error');
+    } finally {
+      setIsLoading(false);
     }
-  }, [address, inputToken, tradeAmount, onLog]);
+  }, [address, walletClient, inputToken, tradeAmount, onLog]);
   
-  // Execute arbitrage
+  // Execute arbitrage (uses window.ethereum for signing - works when wallet is connected)
   const handleExecute = useCallback(async () => {
-    if (!walletClient || !executionPlan) return;
+    if (!executionPlan) return;
     
     setViewMode('executing');
     setError(null);
@@ -234,7 +285,7 @@ export const ArbitrageExecutor: React.FC<ArbitrageExecutorProps> = ({ onLog }) =
     try {
       const result = await executeArbitrage(
         executionPlan,
-        walletClient,
+        walletClient as any,
         (status, step) => {
           setStatusMessage(status);
           if (step) {
@@ -280,7 +331,7 @@ export const ArbitrageExecutor: React.FC<ArbitrageExecutorProps> = ({ onLog }) =
     } finally {
       setIsLoading(false);
     }
-  }, [walletClient, executionPlan, onLog]);
+  }, [walletClient, executionPlan, onLog, address]);
   
   // Reset
   const handleReset = () => {
@@ -395,17 +446,6 @@ export const ArbitrageExecutor: React.FC<ArbitrageExecutorProps> = ({ onLog }) =
             </button>
           )}
           
-          {/* Settings button */}
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            className={`p-2 rounded-lg transition-colors ${
-              showSettings ? 'bg-cyan-500/20 text-cyan-400' : 'hover:bg-white/10 text-gray-400'
-            }`}
-            title="Settings"
-          >
-            <Settings size={18} />
-          </button>
-          
           {/* Reset button */}
           {viewMode !== 'overview' && viewMode !== 'auto' && !isAutoMode && (
             <button
@@ -441,75 +481,82 @@ export const ArbitrageExecutor: React.FC<ArbitrageExecutorProps> = ({ onLog }) =
         </div>
       )}
       
-      {/* Settings Panel */}
-      {showSettings && (
-        <div className="p-4 bg-white/5 border-b border-white/10">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-400 font-mono uppercase mb-1 block">
-                Min Profit (%)
-              </label>
-              <input
-                type="number"
-                value={minProfitPercent}
-                onChange={(e) => setMinProfitPercent(Number(e.target.value))}
-                className="w-full bg-black/30 border border-white/20 rounded px-3 py-2 text-white text-sm"
-                min="0.1"
-                max="10"
-                step="0.1"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 font-mono uppercase mb-1 block">
-                Max Gas ($)
-              </label>
-              <input
-                type="number"
-                value={maxGasCost}
-                onChange={(e) => setMaxGasCost(Number(e.target.value))}
-                className="w-full bg-black/30 border border-white/20 rounded px-3 py-2 text-white text-sm"
-                min="1"
-                max="100"
-                step="1"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 font-mono uppercase mb-1 block">
-                Trade Amount ($)
-              </label>
+      {/* Settings Panel - always visible */}
+      <div className="p-4 bg-white/5 border-b border-white/10">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-gray-400 font-mono uppercase mb-1 block">
+              Min Profit (%)
+            </label>
+            <input
+              type="number"
+              value={minProfitPercent}
+              onChange={(e) => setMinProfitPercent(Number(e.target.value))}
+              className="w-full bg-black/30 border border-white/20 rounded px-3 py-2 text-white text-sm"
+              min="0"
+              max="10"
+              step="0.01"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 font-mono uppercase mb-1 block">
+              Max Gas ($)
+            </label>
+            <input
+              type="number"
+              value={maxGasCost}
+              onChange={(e) => setMaxGasCost(Number(e.target.value))}
+              className="w-full bg-black/30 border border-white/20 rounded px-3 py-2 text-white text-sm"
+              min="1"
+              max="100"
+              step="1"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 font-mono uppercase mb-1 block">
+              Trade Amount ($)
+            </label>
+            <div className="flex gap-2">
               <input
                 type="number"
                 value={tradeAmount}
                 onChange={(e) => setTradeAmount(e.target.value)}
-                className="w-full bg-black/30 border border-white/20 rounded px-3 py-2 text-white text-sm"
-                min="100"
-                max="100000"
-                step="100"
+                className="flex-1 bg-black/30 border border-white/20 rounded px-3 py-2 text-white text-sm"
+                min="1"
+                max="1000000"
+                step="1"
               />
-            </div>
-            <div>
-              <label className="text-xs text-gray-400 font-mono uppercase mb-1 block">
-                Scan Interval (sec)
-              </label>
-              <input
-                type="number"
-                value={checkInterval}
-                onChange={(e) => setCheckInterval(Number(e.target.value))}
-                className="w-full bg-black/30 border border-white/20 rounded px-3 py-2 text-white text-sm"
-                min="10"
-                max="300"
-                step="10"
-              />
+              <button
+                type="button"
+                onClick={() => setTradeAmount(availableBalance)}
+                className="px-3 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 rounded text-xs font-mono whitespace-nowrap"
+              >
+                Max
+              </button>
             </div>
           </div>
-          
-          {/* Balance display */}
-          <div className="mt-3 p-2 bg-black/30 rounded flex items-center justify-between">
-            <span className="text-gray-400 text-sm">Available {inputToken}:</span>
-            <span className="text-white font-mono">{parseFloat(availableBalance).toFixed(2)}</span>
+          <div>
+            <label className="text-xs text-gray-400 font-mono uppercase mb-1 block">
+              Scan Interval (sec)
+            </label>
+            <input
+              type="number"
+              value={checkInterval}
+              onChange={(e) => setCheckInterval(Number(e.target.value))}
+              className="w-full bg-black/30 border border-white/20 rounded px-3 py-2 text-white text-sm"
+              min="10"
+              max="300"
+              step="10"
+            />
           </div>
         </div>
-      )}
+        
+        {/* Balance display */}
+        <div className="mt-3 p-2 bg-black/30 rounded flex items-center justify-between">
+          <span className="text-gray-400 text-sm">Available {inputToken}:</span>
+          <span className="text-white font-mono">{parseFloat(availableBalance).toFixed(2)}</span>
+        </div>
+      </div>
       
       {/* Content */}
       <div className="p-4">
@@ -759,7 +806,8 @@ export const ArbitrageExecutor: React.FC<ArbitrageExecutorProps> = ({ onLog }) =
                 <button
                   key={i}
                   onClick={() => handleSelectOpportunity(opp)}
-                  className="w-full bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/50 rounded-lg p-3 text-left transition-colors"
+                  disabled={isLoading}
+                  className="w-full bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/50 rounded-lg p-3 text-left transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
@@ -864,9 +912,15 @@ export const ArbitrageExecutor: React.FC<ArbitrageExecutorProps> = ({ onLog }) =
             </div>
             
             {/* Execute Button */}
+            {!isConnected && (
+              <p className="text-yellow-400 text-xs mb-2">Connect wallet to sign transaction</p>
+            )}
+            {executionPlan.netProfit < 0 && (
+              <p className="text-amber-400 text-xs mb-2">⚠️ Net loss — you can still execute for testing</p>
+            )}
             <button
               onClick={handleExecute}
-              disabled={isLoading || executionPlan.netProfit <= 0}
+              disabled={isLoading || !isConnected}
               className="w-full bg-cyan-500 hover:bg-cyan-500/80 disabled:bg-gray-600 disabled:cursor-not-allowed text-black font-bold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
             >
               {isLoading ? (
@@ -874,7 +928,7 @@ export const ArbitrageExecutor: React.FC<ArbitrageExecutorProps> = ({ onLog }) =
               ) : (
                 <>
                   <Zap size={20} />
-                  Execute Arbitrage
+                  {isConnected ? 'Execute Arbitrage' : 'Connect Wallet to Execute'}
                 </>
               )}
             </button>

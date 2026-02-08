@@ -19,7 +19,7 @@ export interface AgentMetadata {
   role: AgentRole;
   description: string;
   capabilities: string[];
-  tokenId: number; // EIP-8004
+  tokenId: number; 
   trustScore: number;
   walletAddress: string;
   spriteSeed: string;

@@ -3,7 +3,7 @@
 // Uses Arc (Circle CCTP) as liquidity hub for native USDC cross-chain transfers
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useAccount, useWalletClient, useChainId } from 'wagmi';
+import { useAccount, useWalletClient } from 'wagmi';
 import {
   Zap,
   TrendingUp,
@@ -30,8 +30,8 @@ import {
   Position,
   YieldOpportunity,
   RotationPlan,
-  SUPPORTED_CHAINS,
 } from '../services/yieldRotation';
+import { getBestYieldOpportunities } from '../services/yieldFetcher';
 import {
   autoYieldMonitor,
   MonitorState,
@@ -44,12 +44,11 @@ interface OneClickYieldProps {
   onLog?: (message: string, type?: 'info' | 'success' | 'error') => void;
 }
 
-type ViewMode = 'overview' | 'scanning' | 'plan' | 'executing' | 'success' | 'error' | 'auto' | 'history';
+type ViewMode = 'overview' | 'scanning' | 'plan' | 'executing' | 'success' | 'error' | 'auto' | 'history' | 'opportunities';
 
 export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
   const { address, isConnected, connector } = useAccount();
   const { data: walletClient } = useWalletClient();
-  const chainId = useChainId();
   const onLogRef = useRef(onLog);
   onLogRef.current = onLog;
   
@@ -68,13 +67,14 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
     }
   }, [isConnected, walletClient, connector]);
   
-  // State
+  // State - always mainnet (testnet has no real yield opportunities)
+  const isTestnet = false;
   const [viewMode, setViewMode] = useState<ViewMode>('overview');
-  const [isTestnet, setIsTestnet] = useState(false);
   const [positions, setPositions] = useState<Position[]>([]);
   const [opportunities, setOpportunities] = useState<YieldOpportunity[]>([]);
   const [bestPlan, setBestPlan] = useState<RotationPlan | null>(null);
   const [allPlans, setAllPlans] = useState<RotationPlan[]>([]);
+  const [selectedPlan, setSelectedPlan] = useState<RotationPlan | null>(null);
   const [statusMessage, setStatusMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
@@ -84,6 +84,10 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
   const [monitorState, setMonitorState] = useState<MonitorState | null>(null);
   const [isAutoMode, setIsAutoMode] = useState(false);
   
+  // All opportunities (browse mode)
+  const [allOpportunities, setAllOpportunities] = useState<YieldOpportunity[]>([]);
+  const [isLoadingOpportunities, setIsLoadingOpportunities] = useState(false);
+
   // Settings
   const [minApyImprovement, setMinApyImprovement] = useState(2);
   const [maxGasCost, setMaxGasCost] = useState(50);
@@ -118,12 +122,10 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
     setMonitorState(autoYieldMonitor.getState());
   }, []);
   
-  // Detect testnet
+  // Always use mainnet config for auto-monitor
   useEffect(() => {
-    const testnetChains = SUPPORTED_CHAINS.testnet.map(c => c.id);
-    setIsTestnet(testnetChains.includes(chainId));
-    autoYieldMonitor.updateConfig({ isTestnet: testnetChains.includes(chainId) });
-  }, [chainId]);
+    autoYieldMonitor.updateConfig({ isTestnet: false });
+  }, []);
   
   // Start auto-mode
   const handleStartAuto = useCallback(async () => {
@@ -172,6 +174,7 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
       setOpportunities(result.opportunities);
       setBestPlan(result.bestPlan);
       setAllPlans(result.allPlans);
+      setSelectedPlan(result.bestPlan);
       
       if (result.positions.length === 0) {
         setError('No token positions found in your wallet.');
@@ -192,9 +195,10 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
     }
   }, [address, minApyImprovement, isTestnet, onLog]);
   
-  // Execute rotation
+  // Execute rotation (uses selectedPlan, falls back to bestPlan)
+  const planToExecute = selectedPlan || bestPlan;
   const handleExecute = useCallback(async () => {
-    if (!address || !walletClient || !bestPlan) return;
+    if (!address || !walletClient || !planToExecute) return;
     
     setViewMode('executing');
     setError(null);
@@ -202,22 +206,14 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
     onLog?.('🚀 Executing yield rotation...', 'info');
     
     try {
-      const result = await oneClickYieldRotation(
-        address as Address,
-        walletClient,
-        {
-          isTestnet,
-          minApyImprovement,
-          maxGasCost,
-          onStatusUpdate: (status) => {
-            setStatusMessage(status);
-            onLog?.(`📍 ${status}`, 'info');
-          },
-        }
-      );
+      const { executeYieldRotation } = await import('../services/yieldRotation');
+      const result = await executeYieldRotation(planToExecute, walletClient, (status) => {
+        setStatusMessage(status);
+        onLog?.(`📍 ${status}`, 'info');
+      });
       
       if (result.success) {
-        setTxHash(result.result?.txHash || null);
+        setTxHash(result.txHash || null);
         setViewMode('success');
         onLog?.('✅ Yield rotation executed successfully!', 'success');
 
@@ -237,15 +233,45 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [address, walletClient, bestPlan, isTestnet, minApyImprovement, maxGasCost, onLog]);
+  }, [address, walletClient, planToExecute, isTestnet, minApyImprovement, maxGasCost, onLog]);
   
+  // Browse all yield opportunities (no wallet scan needed, no chain restrictions)
+  const handleBrowseOpportunities = useCallback(async () => {
+    setViewMode('opportunities');
+    setIsLoadingOpportunities(true);
+    setError(null);
+    try {
+      // getBestYieldOpportunities with no filters = all chains, all supported tokens
+      const opps = await getBestYieldOpportunities(undefined, undefined, 50000);
+      // Map yieldFetcher format to YieldOpportunity (chainId, chainName, protocol, token, apy, tvl, risk)
+      const mapped: YieldOpportunity[] = opps.map(o => ({
+        chainId: o.chainId,
+        chainName: o.chainName,
+        protocol: o.protocol,
+        token: o.tokenSymbol,
+        apy: o.apy,
+        tvl: o.tvl,
+        risk: o.risk,
+      }));
+      setAllOpportunities(mapped);
+      onLog?.(`✅ Found ${mapped.length} yield opportunities across all chains`, 'info');
+    } catch (err: any) {
+      setError(err.message || 'Failed to fetch opportunities');
+      onLog?.(`❌ ${err.message}`, 'error');
+    } finally {
+      setIsLoadingOpportunities(false);
+    }
+  }, [onLog]);
+
   // Reset
   const handleReset = () => {
     setViewMode('overview');
     setPositions([]);
     setOpportunities([]);
+    setAllOpportunities([]);
     setBestPlan(null);
     setAllPlans([]);
+    setSelectedPlan(null);
     setError(null);
     setTxHash(null);
     setStatusMessage('');
@@ -325,7 +351,7 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
                 {isAutoMode ? 'Auto-Yield Monitor' : 'One-Click Yield Rotation'}
               </h3>
               <p className="text-gray-400 text-sm font-mono">
-                {isTestnet ? '🧪 Testnet' : '🌐 Mainnet'} 
+                🌐 Mainnet
                 {isAutoMode && monitorState && (
                   <span className="ml-2 text-purple-400">
                     • {monitorState.checksCount} checks • {monitorState.executionsCount} executions
@@ -543,6 +569,41 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
           </div>
         )}
         
+        {/* All Opportunities View */}
+        {viewMode === 'opportunities' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-white font-medium">All Yield Opportunities</h4>
+              <button
+                onClick={() => { setViewMode('overview'); setAllOpportunities([]); }}
+                className="text-xs text-gray-400 hover:text-white"
+              >
+                Back
+              </button>
+            </div>
+            <p className="text-gray-400 text-sm">
+              {allOpportunities.length} opportunities across all chains • sorted by APY
+            </p>
+            <div className="max-h-96 overflow-y-auto space-y-2">
+              {allOpportunities.map((opp, i) => (
+                <div
+                  key={`${opp.chainId}-${opp.protocol}-${i}`}
+                  className="flex items-center justify-between bg-white/5 rounded-lg px-3 py-2 border border-white/5"
+                >
+                  <div>
+                    <p className="text-white font-medium">{opp.protocol}</p>
+                    <p className="text-gray-400 text-xs">{opp.chainName} • {opp.token}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-neon-green font-bold">{opp.apy.toFixed(2)}% APY</p>
+                    <p className="text-gray-500 text-xs">TVL: {formatUsd(opp.tvl)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        
         {/* Overview / Initial State */}
         {viewMode === 'overview' && !isAutoMode && (
           <div className="space-y-4">
@@ -603,6 +664,21 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
               >
                 <Play size={20} />
                 Auto Mode
+              </button>
+              
+              <button
+                onClick={handleBrowseOpportunities}
+                disabled={isLoadingOpportunities}
+                className="col-span-2 bg-white/10 hover:bg-white/20 text-white font-medium py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                {isLoadingOpportunities ? (
+                  <Loader2 className="animate-spin" size={18} />
+                ) : (
+                  <>
+                    <Activity size={18} />
+                    Browse All Opportunities
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -688,19 +764,45 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
         )}
         
         {/* Plan View */}
-        {viewMode === 'plan' && bestPlan && (
+        {viewMode === 'plan' && planToExecute && (
           <div className="space-y-4">
+            {/* All Plans Selector */}
+            {allPlans.length > 1 && (
+              <div>
+                <h4 className="text-xs text-gray-400 font-mono uppercase mb-2">All Opportunities ({allPlans.length})</h4>
+                <div className="max-h-32 overflow-y-auto space-y-1">
+                  {allPlans.slice(0, 10).map((plan, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setSelectedPlan(plan)}
+                      className={`w-full flex items-center justify-between rounded-lg px-3 py-2 text-left transition-colors ${
+                        selectedPlan === plan ? 'bg-neon-green/20 border border-neon-green/50' : 'bg-white/5 hover:bg-white/10 border border-transparent'
+                      }`}
+                    >
+                      <span className="text-white text-sm">
+                        {plan.toOpportunity.protocol} on {plan.toOpportunity.chainName}
+                      </span>
+                      <span className="text-neon-green font-mono text-sm">+{plan.apyImprovement.toFixed(2)}%</span>
+                    </button>
+                  ))}
+                  {allPlans.length > 10 && (
+                    <p className="text-gray-500 text-xs px-2">+{allPlans.length - 10} more</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Current Position */}
             <div className="bg-white/5 rounded-lg p-4">
               <h4 className="text-xs text-gray-400 font-mono uppercase mb-2">Current Position</h4>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-white font-bold">{bestPlan.fromPosition.token}</p>
-                  <p className="text-gray-400 text-sm">{bestPlan.fromPosition.chainName}</p>
+                  <p className="text-white font-bold">{planToExecute.fromPosition.token}</p>
+                  <p className="text-gray-400 text-sm">{planToExecute.fromPosition.chainName}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-white font-mono">{parseFloat(bestPlan.fromPosition.balanceFormatted).toFixed(4)}</p>
-                  <p className="text-gray-400 text-sm">{formatUsd(bestPlan.fromPosition.valueUsd)}</p>
+                  <p className="text-white font-mono">{parseFloat(planToExecute.fromPosition.balanceFormatted).toFixed(4)}</p>
+                  <p className="text-gray-400 text-sm">{formatUsd(planToExecute.fromPosition.valueUsd)}</p>
                 </div>
               </div>
             </div>
@@ -714,15 +816,15 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
             
             {/* Target Opportunity */}
             <div className="bg-neon-green/10 border border-neon-green/30 rounded-lg p-4">
-              <h4 className="text-xs text-neon-green font-mono uppercase mb-2">Best Opportunity</h4>
+              <h4 className="text-xs text-neon-green font-mono uppercase mb-2">Selected Opportunity</h4>
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-white font-bold">{bestPlan.toOpportunity.protocol}</p>
-                  <p className="text-gray-400 text-sm">{bestPlan.toOpportunity.chainName}</p>
+                  <p className="text-white font-bold">{planToExecute.toOpportunity.protocol}</p>
+                  <p className="text-gray-400 text-sm">{planToExecute.toOpportunity.chainName}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-neon-green font-bold text-xl">{bestPlan.toOpportunity.apy.toFixed(2)}% APY</p>
-                  <p className="text-gray-400 text-sm">TVL: {formatUsd(bestPlan.toOpportunity.tvl)}</p>
+                  <p className="text-neon-green font-bold text-xl">{planToExecute.toOpportunity.apy.toFixed(2)}% APY</p>
+                  <p className="text-gray-400 text-sm">TVL: {formatUsd(planToExecute.toOpportunity.tvl)}</p>
                 </div>
               </div>
             </div>
@@ -731,40 +833,40 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
             <div className="bg-white/5 rounded-lg p-4 space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">APY Improvement</span>
-                <span className="text-neon-green font-bold">+{bestPlan.apyImprovement.toFixed(2)}%</span>
+                <span className="text-neon-green font-bold">+{planToExecute.apyImprovement.toFixed(2)}%</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Est. Annual Gain</span>
-                <span className="text-white">{formatUsd(bestPlan.estimatedAnnualGain)}</span>
+                <span className="text-white">{formatUsd(planToExecute.estimatedAnnualGain)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Gas Cost</span>
-                <span className="text-spice-orange">{formatUsd(bestPlan.gasCostUsd)}</span>
+                <span className="text-spice-orange">{formatUsd(planToExecute.gasCostUsd)}</span>
               </div>
               <div className="border-t border-white/10 pt-2 flex justify-between text-sm">
                 <span className="text-gray-400">Net Annual Benefit</span>
-                <span className={bestPlan.netBenefit > 0 ? 'text-neon-green font-bold' : 'text-red-400'}>
-                  {formatUsd(bestPlan.netBenefit)}
+                <span className={planToExecute.netBenefit > 0 ? 'text-neon-green font-bold' : 'text-red-400'}>
+                  {formatUsd(planToExecute.netBenefit)}
                 </span>
               </div>
             </div>
             
             {/* Arc Badge - Show when USDC cross-chain transfer */}
-            {bestPlan.fromPosition.token === 'USDC' &&
-             bestPlan.fromPosition.chainId !== bestPlan.toOpportunity.chainId &&
+            {planToExecute.fromPosition.token === 'USDC' &&
+             planToExecute.fromPosition.chainId !== planToExecute.toOpportunity.chainId &&
              canUseArcRoute(
-               bestPlan.fromPosition.chainId,
-               bestPlan.toOpportunity.chainId,
-               getArcUsdcAddress(bestPlan.fromPosition.chainId) || '',
-               getArcUsdcAddress(bestPlan.toOpportunity.chainId) || ''
+               planToExecute.fromPosition.chainId,
+               planToExecute.toOpportunity.chainId,
+               getArcUsdcAddress(planToExecute.fromPosition.chainId) || '',
+               getArcUsdcAddress(planToExecute.toOpportunity.chainId) || ''
              ) && (
               <div className="flex justify-center mb-3">
                 <ArcBadge
                   isArcRoute={true}
                   size="md"
                   showDetails={true}
-                  sourceChain={bestPlan.fromPosition.chainName}
-                  destinationChain={bestPlan.toOpportunity.chainName}
+                  sourceChain={planToExecute.fromPosition.chainName}
+                  destinationChain={planToExecute.toOpportunity.chainName}
                   estimatedTime="~15 minutes"
                 />
               </div>
@@ -773,7 +875,7 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
             {/* Execute Button */}
             <button
               onClick={handleExecute}
-              disabled={isLoading || bestPlan.netBenefit <= 0}
+              disabled={isLoading || planToExecute.netBenefit <= 0}
               className="w-full bg-neon-green hover:bg-neon-green/80 disabled:bg-gray-600 disabled:cursor-not-allowed text-black font-bold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
             >
               {isLoading ? (
@@ -806,9 +908,9 @@ export const OneClickYield: React.FC<OneClickYieldProps> = ({ onLog }) => {
               Your capital has been moved to the higher yield opportunity
             </p>
             
-            {txHash && bestPlan && (
+            {txHash && planToExecute && (
               <a
-                href={getExplorerUrl(txHash, bestPlan.toOpportunity.chainId)}
+                href={getExplorerUrl(txHash, planToExecute.toOpportunity.chainId)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 text-neon-green hover:underline"

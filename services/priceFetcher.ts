@@ -232,11 +232,16 @@ export async function fetchTokenPrice(
 }
 
 // Fetch prices for a token across multiple chains
+// When forArbitrage=true, skips fallback to get real per-chain prices (CoinGecko can show slight variations)
 export async function fetchCrossChainPrices(
   tokenSymbol: 'USDC' | 'USDT' | 'DAI' | 'WETH',
-  chainIds: number[] = [1, 42161, 10, 137, 8453]
+  chainIds: number[] = [1, 42161, 10, 137, 8453],
+  forArbitrage: boolean = false
 ): Promise<PriceData[]> {
   const prices: PriceData[] = [];
+  const chainNames: Record<number, string> = {
+    1: 'Ethereum', 42161: 'Arbitrum', 10: 'Optimism', 137: 'Polygon', 8453: 'Base', 43114: 'Avalanche',
+  };
 
   // Fetch prices in parallel with timeout
   const pricePromises = chainIds.map(async (chainId) => {
@@ -244,13 +249,31 @@ export async function fetchCrossChainPrices(
     if (!tokenAddress) return null;
 
     try {
-      // Add timeout to prevent hanging
-      const timeoutPromise = new Promise<null>((resolve) => 
+      const timeoutPromise = new Promise<null>((resolve) =>
         setTimeout(() => resolve(null), 5000)
       );
-      
-      const pricePromise = fetchTokenPrice(chainId, tokenAddress, tokenSymbol);
-      return await Promise.race([pricePromise, timeoutPromise]);
+
+      let priceData: PriceData | null;
+      if (forArbitrage) {
+        // Skip fallback - fetch real API prices for arbitrage (slight chain-to-chain variations exist)
+        const result = await fetchPriceFromCoinGecko(chainId, tokenAddress);
+        if (!result || result.price === 0) return null;
+        priceData = {
+          chainId,
+          chainName: chainNames[chainId] || `Chain ${chainId}`,
+          token: tokenAddress,
+          tokenSymbol,
+          price: result.price,
+          priceUSD: result.price,
+          source: result.source,
+          liquidity: 0,
+          timestamp: Date.now(),
+        };
+      } else {
+        priceData = await fetchTokenPrice(chainId, tokenAddress, tokenSymbol);
+      }
+
+      return await Promise.race([Promise.resolve(priceData), timeoutPromise]);
     } catch (error) {
       console.warn(`Failed to fetch price for ${tokenSymbol} on chain ${chainId}:`, error);
       return null;
@@ -258,18 +281,17 @@ export async function fetchCrossChainPrices(
   });
 
   const results = await Promise.all(pricePromises);
-  
   return results.filter((price): price is PriceData => price !== null);
 }
 
 // Detect arbitrage opportunities across chains
 export async function detectArbitrageOpportunities(
   tokenSymbol: 'USDC' | 'USDT' | 'DAI' | 'WETH' = 'USDC',
-  minProfitPercent: number = 0.5,
+  minProfitPercent: number = 0.05, // Lowered to 0.05% to show more opportunities (real spreads are often small)
   amount: number = 1000 // USD amount to trade
 ): Promise<ArbitrageOpportunity[]> {
   const chainIds = [1, 42161, 10, 137, 8453]; // Ethereum, Arbitrum, Optimism, Polygon, Base
-  const prices = await fetchCrossChainPrices(tokenSymbol, chainIds);
+  const prices = await fetchCrossChainPrices(tokenSymbol, chainIds, true); // forArbitrage=true: real API prices
 
   if (prices.length < 2) {
     return [];
@@ -287,10 +309,11 @@ export async function detectArbitrageOpportunities(
 
       // Calculate price difference
       const avgPrice = (priceA.priceUSD + priceB.priceUSD) / 2;
+      if (avgPrice <= 0) continue;
       const priceDiff = Math.abs(priceA.priceUSD - priceB.priceUSD);
       const priceDiffPercent = (priceDiff / avgPrice) * 100;
 
-      // Only consider if difference is significant
+      // Only consider if difference meets minimum (0 = no minimum, show all)
       if (priceDiffPercent < minProfitPercent) continue;
 
       // Estimate profit after fees (assuming ~0.3% DEX fees + ~0.1% bridge fees)
@@ -299,8 +322,8 @@ export async function detectArbitrageOpportunities(
       const fees = (totalFeesPercent / 100) * amount;
       const netProfit = grossProfit - fees;
 
-      // Only include if profitable after fees
-      if (netProfit <= 0) continue;
+      // Only include if profitable after fees (or near-break-even for small amounts)
+      if (netProfit < -1) continue; // Allow small negative for demo (user sees spread)
 
       // Determine buy/sell direction
       const cheaperChain = priceA.priceUSD < priceB.priceUSD ? priceA : priceB;

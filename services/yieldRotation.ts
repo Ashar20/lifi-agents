@@ -473,6 +473,7 @@ export async function fetchYieldOpportunities(
     const data = await response.json();
     const pools = data.data || [];
 
+    // Broad chain mapping — show yields from any chain DeFiLlama tracks
     const chainNameToId: Record<string, number> = {
       'Ethereum': 1,
       'Arbitrum': 42161,
@@ -480,25 +481,37 @@ export async function fetchYieldOpportunities(
       'Polygon': 137,
       'Base': 8453,
       'Avalanche': 43114,
+      'BSC': 56,
+      'Fantom': 250,
+      'Gnosis': 100,
+      'Celo': 42220,
+      'Moonbeam': 1284,
+      'Linea': 59144,
+      'Scroll': 534352,
+      'zkSync Era': 324,
+      'Mantle': 5000,
+      'Blast': 81457,
+      'Mode': 34443,
+      'Metis': 1088,
+      'Sei': 1329,
     };
 
-    const supportedChainNames = Object.keys(chainNameToId);
     const supportedTokens = tokenFilter
       ? [tokenFilter.toUpperCase()]
-      : ['USDC', 'USDT', 'DAI', 'WETH', 'USDC.E', 'USDbC', 'ETH'];
+      : ['USDC', 'USDT', 'DAI', 'WETH', 'USDC.E', 'USDbC', 'ETH', 'WBTC', 'AVAX', 'MATIC', 'BNB'];
 
-    // First pass: filter by basic criteria - use all protocols
+    // First pass: filter by basic criteria — no chain restrictions, all protocols
     const filtered = pools.filter((pool: any) => {
       const chain = pool.chain || '';
       const symbol = (pool.symbol || '').toUpperCase();
       const apy = pool.apy || 0;
       const tvl = pool.tvlUsd || 0;
 
-      // Basic filters
-      if (!supportedChainNames.includes(chain)) return false;
+      // Map chain name to ID; skip completely unknown chains
+      if (!chainNameToId[chain]) return false;
       if (!supportedTokens.some(t => symbol.includes(t))) return false;
-      if (apy < 0.5) return false; // Filter out < 0.5%; include bloated yields for visibility
-      if (tvl < 300000) return false; // Min $300k TVL to include more protocols
+      if (apy < 0.1) return false; // Show near-zero yields too
+      if (tvl < 100000) return false; // Min $100k TVL
 
       return true;
     });
@@ -530,8 +543,8 @@ export async function fetchYieldOpportunities(
       console.log(`[Yield]   ${i + 1}. ${opp.protocol} on ${opp.chainName}: ${opp.apy.toFixed(2)}% APY (base: ${opp.apyBase.toFixed(2)}%, reward: ${opp.apyReward.toFixed(2)}%) - Risk: ${opp.risk}, Score: ${opp.score.toFixed(2)}${opp.flags.length ? ` [${opp.flags.join(', ')}]` : ''}`);
     });
 
-    // Return top 50 by score - use all protocols
-    return scored.slice(0, 50).map(({ score, flags, apyBase, apyReward, ...opp }) => opp);
+    // Return top 100 by score — no protocol restrictions
+    return scored.slice(0, 100).map(({ score, flags, apyBase, apyReward, ...opp }) => opp);
   } catch (error) {
     console.error('Error fetching yields:', error);
     return [];

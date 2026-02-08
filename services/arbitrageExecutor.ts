@@ -124,7 +124,7 @@ function getPublicClient(chainId: number) {
   });
 }
 
-// Get token balance
+// Get token balance - for USDC, checks both native USDC and USDC.e (bridged) on chains that have both
 export async function getTokenBalance(
   walletAddress: Address,
   chainId: number,
@@ -135,8 +135,8 @@ export async function getTokenBalance(
     throw new Error(`Token ${tokenSymbol} not found on chain ${chainId}`);
   }
   
-  const token = tokens[tokenSymbol];
   const client = getPublicClient(chainId);
+  const token = tokens[tokenSymbol];
   
   const balance = await client.readContract({
     address: token.address,
@@ -145,9 +145,33 @@ export async function getTokenBalance(
     args: [walletAddress],
   });
   
+  // For USDC on chains with both native and USDC.e (bridged), also check USDC.e if native is 0
+  let totalBalance = balance;
+  if (tokenSymbol === 'USDC' && balance === 0n && tokens['USDC.e']) {
+    try {
+      const usdcE = tokens['USDC.e'];
+      const balanceE = await client.readContract({
+        address: usdcE.address,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [walletAddress],
+      });
+      if (balanceE > 0n) {
+        totalBalance = balanceE;
+        return {
+          balance: balanceE,
+          formatted: formatUnits(balanceE, usdcE.decimals),
+          decimals: usdcE.decimals,
+        };
+      }
+    } catch (e) {
+      // Ignore - USDC.e might not exist on this chain
+    }
+  }
+  
   return {
-    balance,
-    formatted: formatUnits(balance, token.decimals),
+    balance: totalBalance,
+    formatted: formatUnits(totalBalance, token.decimals),
     decimals: token.decimals,
   };
 }
