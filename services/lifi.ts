@@ -4,7 +4,8 @@
 // Docs: https://docs.li.fi/sdk/overview
 
 import { LiFi, Route, Chain, Token, convertQuoteToRoute } from '@lifi/sdk';
-import { BrowserProvider } from 'ethers';
+import { createWalletClient, custom } from 'viem';
+import { arbitrum, mainnet, optimism, polygon, base, avalanche } from 'viem/chains';
 import type { LifiStep, TokenAmount } from '@lifi/types';
 import { LIFI_INTEGRATOR } from '../constants';
 import {
@@ -704,21 +705,25 @@ export const lifiService = {
       // Get provider for chain switching - required when route starts on a different chain than wallet
       const ethereum = typeof window !== 'undefined' ? (window as any).ethereum : undefined;
 
+      const viemChains = [arbitrum, mainnet, optimism, polygon, base, avalanche];
       const execSettings = {
         ...settings,
         switchChainHook: ethereum
-          ? async (chainId: number) => {
-              console.log('[LI.FI] Switching chain to', chainId);
+          ? async (requiredChainId: number) => {
+              console.log('[LI.FI] Switching chain to', requiredChainId);
               await ethereum.request({
                 method: 'wallet_switchEthereumChain',
-                params: [{ chainId: '0x' + chainId.toString(16) }],
+                params: [{ chainId: '0x' + requiredChainId.toString(16) }],
               });
-              const provider = new BrowserProvider(ethereum);
-              const signer = await provider.getSigner();
-              // SDK expects getChainId() - ensure it returns number (ethers v6 returns bigint)
-              return Object.assign(signer, {
-                getChainId: async () => Number(chainId),
-              }) as any;
+              // Re-create a viem walletClient on the new chain, then wrap it
+              // with the same ethers v5-compatible adapter the SDK expects
+              const targetChain = viemChains.find(c => c.id === requiredChainId);
+              const newWalletClient = createWalletClient({
+                account: walletClient.account,
+                chain: targetChain,
+                transport: custom(ethereum),
+              });
+              return createViemToEthersSigner(newWalletClient) as any;
             }
           : undefined,
         acceptExchangeRateUpdateHook: async () => true,

@@ -34,7 +34,7 @@ const AgentDetailPanel: React.FC<AgentDetailPanelProps> = ({
   const [walletAddress, setWalletAddress] = useState(() => {
     return localStorage.getItem('trackedWalletAddress') || '';
   });
-  const isPortfolioGuardian = agent.role === 'Archivist';
+  const isPortfolioGuardian = agent.role === 'Bene Gesserit';
 
   // Sync wallet input when user connects wallet - ensures agents use connected address
   useEffect(() => {

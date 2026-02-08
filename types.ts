@@ -1,11 +1,11 @@
 export enum AgentRole {
-  COMMANDER = 'Commander',
-  NAVIGATOR = 'Navigator',
-  ARCHIVIST = 'Archivist',
-  MERCHANT = 'Merchant',
-  SENTINEL = 'Sentinel',
-  ORACLE = 'Oracle',
-  GLITCH = 'Glitch',
+  COMMANDER = 'Kwisatz Haderach',
+  NAVIGATOR = 'Fremen Scout',
+  ARCHIVIST = 'Bene Gesserit',
+  MERCHANT = 'Planetologist',
+  SENTINEL = 'Swordmaster',
+  ORACLE = 'Mentat',
+  GLITCH = 'Naib',
 }
 
 export interface AgentPersonality {

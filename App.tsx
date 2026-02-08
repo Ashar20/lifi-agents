@@ -421,7 +421,7 @@ const App: React.FC = () => {
       let taskType: any = 'custom_order'; // Cast to any to bypass strict type check
       let summary = '';
 
-      if (agent.role === 'Navigator') {
+      if (agent.role === 'Fremen Scout') {
         // Arbitrage Hunter - Real price monitoring with detailed logs
         addLog(agent.name, '👀 Starting arbitrage scan...');
         await new Promise(r => setTimeout(r, 300));
@@ -481,7 +481,7 @@ const App: React.FC = () => {
           taskType = 'arbitrage_detection';
           summary = `Scanned real prices across 5 chains. No profitable arbitrage opportunities found (price differences too small after fees).`;
         }
-      } else if (agent.role === 'Archivist') {
+      } else if (agent.role === 'Bene Gesserit') {
         // Portfolio Guardian - Real position tracking using LI.FI SDK
         addLog(agent.name, '📂 Starting portfolio scan...');
         await new Promise(r => setTimeout(r, 200));
@@ -586,7 +586,7 @@ const App: React.FC = () => {
           taskType = 'position_monitoring';
           summary = `Portfolio tracking failed: ${error.message}`;
         }
-      } else if (agent.role === 'Oracle') {
+      } else if (agent.role === 'Mentat') {
         // Rebalancer - Real allocation management
         addLog(agent.name, '⚖️ Analyzing portfolio allocations across chains...');
 
@@ -635,7 +635,7 @@ const App: React.FC = () => {
           taskType = 'rebalancing';
           summary = `Rebalancing analysis failed: ${error.message}`;
         }
-      } else if (agent.role === 'Merchant') {
+      } else if (agent.role === 'Planetologist') {
         // Yield Seeker - Real yield optimization with gas validation
         addLog(agent.name, '🔍 Starting yield hunt...');
         await new Promise(r => setTimeout(r, 200));
@@ -803,7 +803,7 @@ const App: React.FC = () => {
           taskType = 'yield_optimization';
           summary = `Yield scanning failed: ${error.message}`;
         }
-      } else if (agent.role === 'Sentinel') {
+      } else if (agent.role === 'Swordmaster') {
         // Risk Sentinel - Real route validation with detailed logs
         addLog(agent.name, '🛡️ Starting safety analysis...');
         await new Promise(r => setTimeout(r, 200));
@@ -870,7 +870,7 @@ const App: React.FC = () => {
           taskType = 'risk_analysis';
           summary = `Route validation failed: ${error.message}`;
         }
-      } else if (agent.role === 'Glitch') {
+      } else if (agent.role === 'Naib') {
         // Route Executor - Real execution with AUTO-SIGN and detailed logging
         addLog(agent.name, '⚡ Stilgar powering up...');
         await new Promise(r => setTimeout(r, 200));
@@ -882,6 +882,11 @@ const App: React.FC = () => {
         const noArbitrageFound = chaniResult?.type === 'arbitrage_detection' &&
           (chaniResult?.opportunities?.length === 0 || chaniResult?.message?.includes('No profitable'));
 
+        // Check for rebalancing intent with actions from Thufir Hawat (a5)
+        const thufirResult = context?.previousResults?.['a5'];
+        const isRebalancingIntent = (taskDescription || '').toLowerCase().includes('rebalance') ||
+          context?.intentType === 'rebalancing';
+
         if (isArbitrageIntent && noArbitrageFound) {
           addLog(agent.name, '⏸️ No arbitrage opportunities to execute. Chani found no profitable gaps.');
           result = {
@@ -891,6 +896,138 @@ const App: React.FC = () => {
           };
           taskType = 'cross_chain_swap';
           summary = 'Skipped: No arbitrage opportunities found.';
+        } else if (isRebalancingIntent && thufirResult?.type === 'rebalancing' && thufirResult?.needsRebalancing && thufirResult?.actions?.length > 0) {
+          // Execute rebalancing actions from Thufir Hawat
+          addLog(agent.name, `🔄 Executing rebalancing: ${thufirResult.actions.length} actions needed...`);
+
+          const { lifiService } = await import('./services/lifi');
+          const { prepareExecution } = await import('./services/routeExecutor');
+          const executedActions: Array<{ action: string; token: string; amount: number; status: string; txHash?: string; error?: string }> = [];
+
+          const TOKEN_ADDRESSES_REBAL: Record<string, Record<number, string>> = {
+            USDC: { 1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 42161: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 10: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', 137: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', 8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
+            USDT: { 1: '0xdAC17F958D2ee523a2206206994597C13D831ec7', 42161: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', 10: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', 137: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F' },
+            DAI: { 1: '0x6B175474E89094C44Da98b954EedeAC495271d0F', 42161: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', 10: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', 137: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063' },
+            ETH: { 1: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', 42161: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', 10: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', 8453: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' },
+          };
+
+          // Determine the wallet's primary chain from Irulan's (a2) data or walletClient
+          const irulanResult = context?.previousResults?.['a2'];
+          const primaryChainId = walletClient?.chain?.id || 42161;
+
+          for (const action of thufirResult.actions) {
+            const tokenSymbol = action.tokenSymbol || action.token;
+            const amountUSD = action.amount;
+            addLog(agent.name, `\n${action.type === 'sell' ? '📤' : '📥'} ${action.type.toUpperCase()} ~$${amountUSD.toFixed(2)} of ${tokenSymbol}...`);
+
+            try {
+              if (action.type === 'sell') {
+                // Sell = swap this token to USDC (or the target token from buy actions)
+                const fromToken = TOKEN_ADDRESSES_REBAL[tokenSymbol]?.[primaryChainId];
+                const toToken = TOKEN_ADDRESSES_REBAL['USDC']?.[primaryChainId];
+                if (!fromToken || !toToken) {
+                  addLog(agent.name, `   ⚠️ Skipping: ${tokenSymbol} not supported for swap on chain ${primaryChainId}`);
+                  executedActions.push({ action: 'sell', token: tokenSymbol, amount: amountUSD, status: 'skipped', error: 'Token not supported on chain' });
+                  continue;
+                }
+
+                // For sell actions of USDC (overweight), we'll use the amount in buy actions instead
+                // USDC sell is implicit - the buy actions will consume it
+                if (tokenSymbol === 'USDC') {
+                  addLog(agent.name, `   ℹ️ USDC sell will be executed via buy actions (swap USDC → target tokens)`);
+                  executedActions.push({ action: 'sell', token: tokenSymbol, amount: amountUSD, status: 'implicit' });
+                  continue;
+                }
+
+                // Convert USD amount to token amount
+                const tokenBalances = irulanResult?.positionsByToken || {};
+                const tokenValueUSD = tokenBalances[tokenSymbol] || 0;
+                const totalBalance = irulanResult?.positions?.find((p: any) => p.tokenSymbol === tokenSymbol)?.balance || 0;
+                const pricePerToken = totalBalance > 0 ? tokenValueUSD / totalBalance : 0;
+                const tokenAmount = pricePerToken > 0 ? amountUSD / pricePerToken : 0;
+                if (tokenAmount <= 0) {
+                  addLog(agent.name, `   ⚠️ Cannot determine token amount for $${amountUSD.toFixed(2)} of ${tokenSymbol}`);
+                  executedActions.push({ action: 'sell', token: tokenSymbol, amount: amountUSD, status: 'skipped', error: 'Cannot determine amount' });
+                  continue;
+                }
+
+                const decimals = tokenSymbol === 'USDC' || tokenSymbol === 'USDT' || tokenSymbol === 'DAI' ? 6 : 18;
+                const rawAmount = Math.floor(tokenAmount * Math.pow(10, decimals)).toString();
+
+                const quote = await lifiService.getQuote({
+                  fromChain: primaryChainId,
+                  toChain: primaryChainId,
+                  fromToken,
+                  toToken,
+                  fromAmount: rawAmount,
+                  fromAddress: walletAddress,
+                });
+
+                if (walletClient && quote) {
+                  const execResult = await lifiService.executeRoute(quote, walletClient);
+                  const txHash = execResult?.transactionHash || execResult?.hash || execResult?.steps?.[0]?.execution?.process?.[0]?.txHash;
+                  addLog(agent.name, `   ✅ Sold ${tokenAmount.toFixed(4)} ${tokenSymbol}. TX: ${txHash?.slice(0, 10) || 'pending'}...`);
+                  executedActions.push({ action: 'sell', token: tokenSymbol, amount: amountUSD, status: 'executed', txHash });
+                } else {
+                  addLog(agent.name, `   📋 Quote ready for ${tokenAmount.toFixed(4)} ${tokenSymbol} → USDC`);
+                  executedActions.push({ action: 'sell', token: tokenSymbol, amount: amountUSD, status: 'quoted' });
+                }
+              } else if (action.type === 'buy') {
+                // Buy = swap USDC to this token
+                const fromToken = TOKEN_ADDRESSES_REBAL['USDC']?.[primaryChainId];
+                const toToken = TOKEN_ADDRESSES_REBAL[tokenSymbol]?.[primaryChainId];
+                if (!fromToken || !toToken) {
+                  addLog(agent.name, `   ⚠️ Skipping: ${tokenSymbol} not available on chain ${primaryChainId}`);
+                  executedActions.push({ action: 'buy', token: tokenSymbol, amount: amountUSD, status: 'skipped', error: 'Token not available on chain' });
+                  continue;
+                }
+
+                // Convert USD to USDC raw amount (6 decimals)
+                const rawAmount = Math.floor(amountUSD * 1e6).toString();
+
+                const quote = await lifiService.getQuote({
+                  fromChain: primaryChainId,
+                  toChain: primaryChainId,
+                  fromToken,
+                  toToken,
+                  fromAmount: rawAmount,
+                  fromAddress: walletAddress,
+                });
+
+                if (walletClient && quote) {
+                  const execResult = await lifiService.executeRoute(quote, walletClient);
+                  const txHash = execResult?.transactionHash || execResult?.hash || execResult?.steps?.[0]?.execution?.process?.[0]?.txHash;
+                  addLog(agent.name, `   ✅ Bought ~$${amountUSD.toFixed(2)} of ${tokenSymbol}. TX: ${txHash?.slice(0, 10) || 'pending'}...`);
+                  executedActions.push({ action: 'buy', token: tokenSymbol, amount: amountUSD, status: 'executed', txHash });
+                } else {
+                  addLog(agent.name, `   📋 Quote ready for USDC → ${tokenSymbol}`);
+                  executedActions.push({ action: 'buy', token: tokenSymbol, amount: amountUSD, status: 'quoted' });
+                }
+              }
+            } catch (actionErr: any) {
+              addLog(agent.name, `   ❌ Failed: ${actionErr.message?.slice(0, 100)}`);
+              executedActions.push({ action: action.type, token: tokenSymbol, amount: amountUSD, status: 'failed', error: actionErr.message });
+            }
+          }
+
+          const executed = executedActions.filter(a => a.status === 'executed').length;
+          const failed = executedActions.filter(a => a.status === 'failed').length;
+          const skipped = executedActions.filter(a => a.status === 'skipped' || a.status === 'implicit').length;
+
+          result = {
+            type: 'rebalancing',
+            status: failed === 0 && executed > 0 ? 'EXECUTED' : executed > 0 ? 'PARTIAL' : 'FAILED',
+            drift: thufirResult.drift,
+            actions: executedActions,
+            executed,
+            failed,
+            skipped,
+          };
+          taskType = 'rebalancing';
+          summary = executed > 0
+            ? `✅ Rebalancing: ${executed} actions executed${failed > 0 ? `, ${failed} failed` : ''}. Drift was ${thufirResult.drift}.`
+            : `❌ Rebalancing failed: ${failed} actions failed out of ${thufirResult.actions.length}.`;
+          addLog(agent.name, `\n${summary}`);
         } else {
         addLog(agent.name, '🔗 Connecting to LI.FI aggregator...');
         // Wait for rate limit to reset from previous agent API calls
@@ -1270,16 +1407,10 @@ const App: React.FC = () => {
                 if (walletClient) {
                   addLog(agent.name, `\n🔐 Wallet detected! Auto-executing deposit (switch chain + sign when prompted)...`);
                   try {
-                    if (walletClient.chain?.id !== sourceBalance.chainId && typeof window !== 'undefined' && (window as any).ethereum) {
-                      addLog(agent.name, `\n🔄 Switching your wallet to ${sourceBalance.chainName}...`);
-                      const hexChainId = '0x' + sourceBalance.chainId.toString(16);
-                      await (window as any).ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hexChainId }] });
-                      await new Promise(r => setTimeout(r, 1500));
-                    }
                     const { executeDirectAaveDeposit } = await import('./services/directAaveDeposit');
                     addLog(agent.name, `📝 Approving USDC and depositing into Aave...`);
                     const depositResult = await executeDirectAaveDeposit(
-                      { chainId: sourceBalance.chainId, usdcAddress: usdcAddr, amountRaw, fromAddress: walletAddress, skipChainCheck: walletClient.chain?.id !== sourceBalance.chainId },
+                      { chainId: sourceBalance.chainId, usdcAddress: usdcAddr, amountRaw, fromAddress: walletAddress },
                       walletClient
                     );
                     if (depositResult.success) {
@@ -1916,16 +2047,10 @@ const App: React.FC = () => {
       let txHash: string;
       if (pendingExecution.type === 'direct_aave' && pendingExecution.directAaveParams) {
         const params = pendingExecution.directAaveParams;
-        if (walletClient.chain?.id !== params.chainId && typeof window !== 'undefined' && (window as any).ethereum) {
-          addLog(AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar', `🔄 Switching your wallet to chain ${params.chainId}...`);
-          const hexChainId = '0x' + params.chainId.toString(16);
-          await (window as any).ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hexChainId }] });
-          await new Promise(r => setTimeout(r, 1500));
-        }
         const { executeDirectAaveDeposit } = await import('./services/directAaveDeposit');
         addLog(AGENTS.find(a => a.id === 'a6')?.name || 'Stilgar', '📝 Approving USDC and depositing into Aave...');
         const depositResult = await executeDirectAaveDeposit(
-          { ...params, skipChainCheck: walletClient.chain?.id !== params.chainId },
+          { ...params },
           walletClient
         );
         if (!depositResult.success) {
@@ -2017,12 +2142,12 @@ const App: React.FC = () => {
         const agent = AGENTS.find(a => a.id === agentId);
         if (agent) {
           const roleOrders: Record<string, string> = {
-            'Navigator': 'Scan for arbitrage opportunities across all chains',
-            'Archivist': 'Track all cross-chain positions and calculate PnL',
-            'Merchant': 'Find best yield opportunities across protocols',
-            'Sentinel': 'Validate route safety for upcoming executions',
-            'Oracle': 'Monitor portfolio allocations and detect drift',
-            'Glitch': 'Prepare LI.FI routes for rapid execution'
+            'Fremen Scout': 'Scan for arbitrage opportunities across all chains',
+            'Bene Gesserit': 'Track all cross-chain positions and calculate PnL',
+            'Planetologist': 'Find best yield opportunities across protocols',
+            'Swordmaster': 'Validate route safety for upcoming executions',
+            'Mentat': 'Monitor portfolio allocations and detect drift',
+            'Naib': 'Prepare LI.FI routes for rapid execution'
           };
           setTimeout(() => {
             executeAgentTask(agentId, roleOrders[agent.role] || `Execute ${agent.role} cross-chain protocols`);

@@ -32,8 +32,6 @@ export interface DirectAaveDepositParams {
   usdcAddress: string;
   amountRaw: string;
   fromAddress: string;
-  /** When true, skip chain check (caller just switched wallet) */
-  skipChainCheck?: boolean;
 }
 
 export interface DirectAaveDepositResult {
@@ -55,7 +53,7 @@ export async function executeDirectAaveDeposit(
     return { success: false, error: 'Wallet not connected.' };
   }
 
-  const { chainId, usdcAddress, amountRaw, fromAddress, skipChainCheck } = params;
+  const { chainId, usdcAddress, amountRaw, fromAddress } = params;
   const amountBigInt = BigInt(amountRaw);
 
   const aave = PROTOCOL_ADDRESSES.aave?.[chainId];
@@ -63,25 +61,40 @@ export async function executeDirectAaveDeposit(
     return { success: false, error: `Aave not supported on chain ${chainId}.` };
   }
 
-  // Ensure wallet is on correct chain (unless caller just switched)
-  if (!skipChainCheck) {
-    const currentChainId = walletClient.chain?.id;
-    if (currentChainId !== chainId) {
-      return {
-        success: false,
-        error: `Please switch to ${chainId === 42161 ? 'Arbitrum' : chainId === 1 ? 'Ethereum' : `chain ${chainId}`} to deposit.`,
-      };
-    }
-  }
-
   try {
-    const { createPublicClient, http } = await import('viem');
+    const { createPublicClient, createWalletClient, custom, http } = await import('viem');
     const chains = await import('viem/chains');
     const chain = [chains.arbitrum, chains.mainnet, chains.optimism, chains.polygon, chains.base].find(
       (c) => c.id === chainId
     );
     if (!chain) {
       return { success: false, error: `Unsupported chain ${chainId}.` };
+    }
+
+    // Switch wallet to the target chain if needed
+    const currentChainId = walletClient.chain?.id;
+    let activeWalletClient = walletClient;
+    if (currentChainId !== chainId) {
+      if (typeof window !== 'undefined' && (window as any).ethereum) {
+        const hexChainId = '0x' + chainId.toString(16);
+        await (window as any).ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: hexChainId }],
+        });
+        // Re-create walletClient bound to the correct chain after provider switch
+        activeWalletClient = createWalletClient({
+          account: walletClient.account,
+          chain,
+          transport: custom((window as any).ethereum),
+        });
+      } else if (walletClient.switchChain) {
+        await walletClient.switchChain({ id: chainId });
+      } else {
+        return {
+          success: false,
+          error: `Please switch to ${chainId === 42161 ? 'Arbitrum' : chainId === 1 ? 'Ethereum' : `chain ${chainId}`} to deposit.`,
+        };
+      }
     }
 
     const publicClient = createPublicClient({
@@ -100,12 +113,12 @@ export async function executeDirectAaveDeposit(
     if (allowance < amountBigInt) {
       // Approve max (Aave recommends type(uint256).max for supply)
       const maxApproval = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
-      const approveHash = await walletClient.writeContract({
+      const approveHash = await activeWalletClient.writeContract({
         address: usdcAddress as `0x${string}`,
         abi: ERC20_ABI,
         functionName: 'approve',
         args: [aave.pool as `0x${string}`, maxApproval],
-        account: walletClient.account,
+        account: activeWalletClient.account,
         chain: chain,
       });
       // Wait for approval to be mined before supply
@@ -113,7 +126,7 @@ export async function executeDirectAaveDeposit(
     }
 
     // Supply to Aave
-    const supplyHash = await walletClient.writeContract({
+    const supplyHash = await activeWalletClient.writeContract({
       address: aave.pool as `0x${string}`,
       abi: AAVE_V3_POOL_ABI,
       functionName: 'supply',
@@ -123,7 +136,7 @@ export async function executeDirectAaveDeposit(
         fromAddress as `0x${string}`,
         0,
       ],
-      account: walletClient.account,
+      account: activeWalletClient.account,
       chain: chain,
     });
 
